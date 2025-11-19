@@ -3,23 +3,22 @@ import { client, deployment } from '../config/azureOpenAI';
 import { AppError } from '../utils/appError';
 
 export interface ReturnReportData {
-  distributor?: string;
-  pharmacy?: string;
-  reportDate?: string;
-  returnNumber?: string;
+  reverseDistributor?: string; // Name of the reverse distributor company
+  pharmacy?: string; // Pharmacy name (if available)
+  reportDate?: string; // Date of the credit report (YYYY-MM-DD format)
+  creditReportNumber?: string; // Report/credit number/reference number
   items?: Array<{
-    itemName?: string;
-    itemCode?: string;
-    quantity?: number;
-    unitPrice?: number;
-    totalPrice?: number;
-    expiryDate?: string;
-    reason?: string;
-    batchNumber?: string;
+    ndcCode?: string; // NDC code (National Drug Code) - CRITICAL for price comparison
+    itemName?: string; // Product/item name
+    manufacturer?: string; // Manufacturer information
+    lotNumber?: string; // Lot/batch number
+    expirationDate?: string; // Expiration date (YYYY-MM-DD format)
+    quantity?: number; // Quantity returned
+    creditAmount?: number; // Credit amount/payment for this product
+    pricePerUnit?: number; // Calculated: creditAmount / quantity
   }>;
-  totalAmount?: number;
-  totalItems?: number;
-  notes?: string;
+  totalCreditAmount?: number; // Total credit amount for the entire report
+  totalItems?: number; // Total number of items in the report
   [key: string]: any;
 }
 
@@ -34,49 +33,55 @@ export const extractTextFromPDF = async (pdfBuffer: Buffer): Promise<string> => 
 
 export const extractStructuredData = async (pdfText: string): Promise<ReturnReportData> => {
   try {
-    const maxTokens = parseInt(process.env.OPENAI_MAX_TOKENS || '10000', 10);
+    const maxTokens = parseInt(process.env.OPENAI_MAX_TOKENS || '20000', 10);
 
-    const systemPrompt = `You are an expert at extracting structured data from pharmacy return reports. 
-Extract all relevant information from the return report and return it as a JSON object.
+    const systemPrompt = `You are an expert at extracting structured data from pharmacy credit reports (return reports) from reverse distributors. 
+Your task is to extract ONLY the critical information needed for price comparison analytics.
 
-The return report typically contains:
-- Distributor information (name, contact details)
-- Pharmacy information (name, address, contact)
-- Report date and return number
-- List of returned items with details like:
-  - Item name and code
-  - Quantity returned
-  - Unit price and total price
-  - Expiry date
-  - Reason for return (expired, damaged, etc.)
-  - Batch number
-- Total amount and total items
-- Any additional notes or comments
+CRITICAL FIELDS TO EXTRACT:
+1. Reverse Distributor Name - The company name that issued this credit report
+2. NDC Codes - National Drug Code for each product (format: XXXXX-XXXX-XX or XXXXXXXX-XX or similar)
+3. Lot Numbers - Batch/lot numbers for each product
+4. Expiration Dates - Expiration dates for each product
+5. Quantity - Number of units returned for each product
+6. Credit Amount - Payment/credit amount for each product
+7. Price Per Unit - Calculate this as: creditAmount / quantity
+8. Manufacturer - Manufacturer name for each product
+9. Report Date - Date of the credit report
+10. Credit Report Number - Reference/credit number
 
-Return the data as a JSON object with the following structure:
+IMPORTANT INSTRUCTIONS:
+- Focus ONLY on extracting the fields listed above
+- NDC codes are CRITICAL - extract them accurately in any format they appear
+- Calculate pricePerUnit = creditAmount / quantity for each item
+- Extract dates in YYYY-MM-DD format
+- If a field is not available in the PDF, use null
+- Do NOT extract unnecessary information like addresses, phone numbers, or other non-essential data
+- Return data as a clean JSON object
+
+Return the data in this exact JSON structure:
 {
-  "distributor": "distributor name",
-  "pharmacy": "pharmacy name",
-  "reportDate": "date in YYYY-MM-DD format",
-  "returnNumber": "return/reference number",
+  "reverseDistributor": "company name",
+  "pharmacy": "pharmacy name if available",
+  "reportDate": "YYYY-MM-DD",
+  "creditReportNumber": "reference number",
   "items": [
     {
-      "itemName": "item name",
-      "itemCode": "item code/SKU",
+      "ndcCode": "NDC code",
+      "itemName": "product name",
+      "manufacturer": "manufacturer name",
+      "lotNumber": "lot/batch number",
+      "expirationDate": "YYYY-MM-DD",
       "quantity": number,
-      "unitPrice": number,
-      "totalPrice": number,
-      "expiryDate": "YYYY-MM-DD",
-      "reason": "reason for return",
-      "batchNumber": "batch number if available"
+      "creditAmount": number,
+      "pricePerUnit": number
     }
   ],
-  "totalAmount": number,
-  "totalItems": number,
-  "notes": "any additional notes"
+  "totalCreditAmount": number,
+  "totalItems": number
 }
 
-Extract all available information. If a field is not available, use null. Be thorough and accurate.`;
+Extract all available information accurately. Be thorough with NDC codes and pricing data.`;
 
     const userPrompt = `Extract structured data from the following pharmacy return report:\n\n${pdfText}`;
 
@@ -129,7 +134,7 @@ Extract all available information. If a field is not available, use null. Be tho
 export const processReturnReport = async (pdfBuffer: Buffer): Promise<ReturnReportData> => {
   // Step 1: Extract text from PDF
   const pdfText = await extractTextFromPDF(pdfBuffer);
-
+  console.log('pdfText', pdfText);
   if (!pdfText || pdfText.trim().length === 0) {
     throw new AppError('No text could be extracted from the PDF', 400);
   }
