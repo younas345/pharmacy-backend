@@ -13,79 +13,100 @@ export const returnReportSchemas = {
       data: {
         type: 'object',
         properties: {
-          distributor: {
+          reverseDistributor: {
             type: 'string',
-            example: 'ABC Distributors',
+            example: 'ABC Reverse Distributors',
+            description: 'Name of the reverse distributor company',
             nullable: true,
           },
           pharmacy: {
             type: 'string',
             example: 'City Pharmacy',
+            description: 'Pharmacy name if available',
             nullable: true,
           },
           reportDate: {
             type: 'string',
             format: 'date',
             example: '2024-01-15',
+            description: 'Date of the credit report',
             nullable: true,
           },
-          returnNumber: {
+          creditReportNumber: {
             type: 'string',
-            example: 'RET-2024-001',
+            example: 'CR-2024-001',
+            description: 'Credit report reference number',
             nullable: true,
           },
           items: {
             type: 'array',
+            description: 'List of returned items with pricing data',
             items: {
               type: 'object',
               properties: {
-                itemName: {
+                ndcCode: {
                   type: 'string',
+                  example: '12345-678-90',
+                  description: 'NDC code (National Drug Code) - CRITICAL for price comparison',
                   nullable: true,
                 },
-                itemCode: {
+                itemName: {
                   type: 'string',
+                  example: 'Medication Name 10mg',
+                  description: 'Product/item name',
+                  nullable: true,
+                },
+                manufacturer: {
+                  type: 'string',
+                  example: 'Manufacturer Inc.',
+                  description: 'Manufacturer information',
+                  nullable: true,
+                },
+                lotNumber: {
+                  type: 'string',
+                  example: 'LOT123456',
+                  description: 'Lot/batch number',
+                  nullable: true,
+                },
+                expirationDate: {
+                  type: 'string',
+                  format: 'date',
+                  example: '2024-12-31',
+                  description: 'Expiration date',
                   nullable: true,
                 },
                 quantity: {
                   type: 'number',
+                  example: 100,
+                  description: 'Quantity returned',
                   nullable: true,
                 },
-                unitPrice: {
+                creditAmount: {
                   type: 'number',
+                  example: 45.50,
+                  description: 'Credit amount/payment for this product',
                   nullable: true,
                 },
-                totalPrice: {
+                pricePerUnit: {
                   type: 'number',
-                  nullable: true,
-                },
-                expiryDate: {
-                  type: 'string',
-                  format: 'date',
-                  nullable: true,
-                },
-                reason: {
-                  type: 'string',
-                  nullable: true,
-                },
-                batchNumber: {
-                  type: 'string',
+                  example: 0.455,
+                  description: 'Calculated price per unit (creditAmount / quantity)',
                   nullable: true,
                 },
               },
             },
             nullable: true,
           },
-          totalAmount: {
+          totalCreditAmount: {
             type: 'number',
+            example: 1250.75,
+            description: 'Total credit amount for the entire report',
             nullable: true,
           },
           totalItems: {
             type: 'number',
-            nullable: true,
-          },
-          notes: {
-            type: 'string',
+            example: 25,
+            description: 'Total number of items in the report',
             nullable: true,
           },
         },
