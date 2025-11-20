@@ -7,12 +7,6 @@ export const productListsSchemas = {
         format: 'uuid',
         example: '123e4567-e89b-12d3-a456-426614174000',
       },
-      product_list_id: {
-        type: 'string',
-        format: 'uuid',
-        nullable: true,
-        example: null,
-      },
       ndc: {
         type: 'string',
         example: '23433-3232-34',
