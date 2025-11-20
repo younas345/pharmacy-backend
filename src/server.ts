@@ -10,6 +10,7 @@ import productListsRoutes from './routes/productListsRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import creditsRoutes from './routes/creditsRoutes';
 import documentsRoutes from './routes/documentsRoutes';
+import barcodeRoutes from './routes/barcodeRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
@@ -84,6 +85,7 @@ app.use('/api/product-lists', productListsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/credits', creditsRoutes);
 app.use('/api/documents', documentsRoutes);
+app.use('/api/barcode', barcodeRoutes);
 
 /**
  * @swagger
