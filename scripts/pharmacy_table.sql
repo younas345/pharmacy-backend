@@ -91,6 +91,16 @@ CREATE TABLE IF NOT EXISTS uploaded_documents (
   processing_progress INTEGER DEFAULT 0
 );
 
+-- Return Reports Table
+CREATE TABLE IF NOT EXISTS return_reports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID NOT NULL REFERENCES uploaded_documents(id) ON DELETE CASCADE,
+  pharmacy_id UUID NOT NULL REFERENCES pharmacy(id) ON DELETE CASCADE,
+  data JSONB NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Pricing Data Table
 CREATE TABLE IF NOT EXISTS pricing_data (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -352,7 +362,10 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_pharmacy_email ON pharmacy(email);
+CREATE INDEX IF NOT EXISTS idx_return_reports_document_id ON return_reports(document_id);
+CREATE INDEX IF NOT EXISTS idx_return_reports_pharmacy_id ON return_reports(pharmacy_id);
 
 -- Add comment to table
 COMMENT ON TABLE pharmacy IS 'Stores pharmacy user information linked to Supabase Auth users';
+COMMENT ON TABLE return_reports IS 'Stores return report data with items array as JSONB';
 
