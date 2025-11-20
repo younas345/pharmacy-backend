@@ -6,10 +6,12 @@ export interface OptimizationRecommendation {
   productName: string;
   recommendedDistributor: string;
   expectedPrice: number;
+  available?: boolean;
   alternativeDistributors: Array<{
     name: string;
     price: number;
     difference: number;
+    available?: boolean;
   }>;
   savings: number;
 }
@@ -292,6 +294,79 @@ export const getOptimizationRecommendations = async (
 
   // Calculate total potential savings
   const totalPotentialSavings = recommendations.reduce((sum, rec) => sum + rec.savings, 0);
+
+  // Collect all unique distributor names from recommendations
+  const distributorNames = new Set<string>();
+  recommendations.forEach((rec) => {
+    distributorNames.add(rec.recommendedDistributor);
+    rec.alternativeDistributors.forEach((alt) => {
+      distributorNames.add(alt.name);
+    });
+  });
+
+  // Fetch distributor IDs from reverse_distributors table
+  const distributorNameToIdMap: Record<string, string> = {};
+  if (distributorNames.size > 0) {
+    const { data: distributors, error: distError } = await db
+      .from('reverse_distributors')
+      .select('id, name')
+      .in('name', Array.from(distributorNames));
+
+    if (!distError && distributors) {
+      distributors.forEach((dist) => {
+        distributorNameToIdMap[dist.name] = dist.id;
+      });
+    }
+  }
+
+  // Check availability for each distributor
+  // Get the most recent report_date for each pharmacy-distributor combination
+  const distributorAvailabilityMap: Record<string, boolean> = {};
+  
+  for (const distributorName of distributorNames) {
+    const distributorId = distributorNameToIdMap[distributorName];
+    
+    if (!distributorId) {
+      // If distributor not found, mark as unavailable
+      distributorAvailabilityMap[distributorName] = false;
+      continue;
+    }
+
+    // Get the most recent report_date for this pharmacy-distributor combination
+    const { data: recentDocuments, error: docError } = await db
+      .from('uploaded_documents')
+      .select('report_date')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('reverse_distributor_id', distributorId)
+      .not('report_date', 'is', null)
+      .order('report_date', { ascending: false })
+      .limit(1);
+
+    if (docError || !recentDocuments || recentDocuments.length === 0 || !recentDocuments[0]?.report_date) {
+      // No data found, mark as unavailable
+      distributorAvailabilityMap[distributorName] = false;
+      continue;
+    }
+
+    const recentDocument = recentDocuments[0];
+
+    // Check if report_date is within last 30 days
+    const reportDate = new Date(recentDocument.report_date);
+    const today = new Date();
+    const daysDiff = Math.floor((today.getTime() - reportDate.getTime()) / (1000 * 60 * 60 * 24));
+    
+    // If within 30 days, mark as unavailable (data is too recent, might not be current)
+    // Otherwise, mark as available (data is older, likely still valid)
+    distributorAvailabilityMap[distributorName] = daysDiff > 30;
+  }
+
+  // Add availability flags to recommendations
+  recommendations.forEach((rec) => {
+    rec.available = distributorAvailabilityMap[rec.recommendedDistributor] ?? false;
+    rec.alternativeDistributors.forEach((alt) => {
+      alt.available = distributorAvailabilityMap[alt.name] ?? false;
+    });
+  });
 
   return {
     recommendations,
