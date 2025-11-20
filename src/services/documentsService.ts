@@ -148,6 +148,48 @@ export interface CreateDocumentInput {
   status?: 'uploading' | 'processing' | 'completed' | 'failed' | 'needs_review';
 }
 
+export interface UploadFileToStorageInput {
+  fileBuffer: Buffer;
+  fileName: string;
+  pharmacyId: string;
+  fileType?: string;
+}
+
+export const uploadFileToStorage = async (
+  input: UploadFileToStorageInput
+): Promise<string> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const storage = supabaseAdmin.storage;
+  const bucketName = 'documents'; // Storage bucket name
+
+  // Generate a unique file path: pharmacy_id/timestamp-filename
+  const timestamp = Date.now();
+  const sanitizedFileName = input.fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+  const filePath = `${input.pharmacyId}/${timestamp}-${sanitizedFileName}`;
+
+  // Upload file to Supabase Storage
+  const { data, error } = await storage.from(bucketName).upload(filePath, input.fileBuffer, {
+    contentType: input.fileType || 'application/pdf',
+    upsert: false, // Don't overwrite existing files
+  });
+
+  if (error) {
+    throw new AppError(`Failed to upload file to storage: ${error.message}`, 400);
+  }
+
+  // Get public URL for the uploaded file
+  const { data: urlData } = storage.from(bucketName).getPublicUrl(filePath);
+
+  if (!urlData?.publicUrl) {
+    throw new AppError('Failed to get public URL for uploaded file', 500);
+  }
+
+  return urlData.publicUrl;
+};
+
 export const createDocument = async (input: CreateDocumentInput): Promise<UploadedDocument> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);

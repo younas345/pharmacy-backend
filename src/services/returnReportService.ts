@@ -1,6 +1,7 @@
 import pdf from 'pdf-parse';
 import { client, deployment } from '../config/azureOpenAI';
 import { AppError } from '../utils/appError';
+import { supabaseAdmin } from '../config/supabase';
 
 export interface ReturnReportData {
   reverseDistributor?: string; // Name of the reverse distributor company
@@ -143,5 +144,56 @@ export const processReturnReport = async (pdfBuffer: Buffer): Promise<ReturnRepo
   const structuredData = await extractStructuredData(pdfText);
 
   return structuredData;
+};
+
+export interface SaveReturnReportInput {
+  document_id: string;
+  pharmacy_id: string;
+  data: ReturnReportData;
+}
+
+export interface ReturnReportRecord {
+  id: string;
+  document_id: string;
+  pharmacy_id: string;
+  data: any; // Single item object stored as JSONB
+  created_at: string;
+  updated_at: string;
+}
+
+export const saveReturnReport = async (
+  input: SaveReturnReportInput
+): Promise<ReturnReportRecord[]> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  // Extract items array from the data
+  const items = input.data.items || [];
+  
+  if (items.length === 0) {
+    throw new AppError('No items to save in return report', 400);
+  }
+
+  // Create one record per item
+  const recordsToInsert = items.map((item: any) => ({
+    document_id: input.document_id,
+    pharmacy_id: input.pharmacy_id,
+    data: item, // Store each item object as JSONB
+  }));
+
+  // Insert all records at once
+  const { data, error } = await db
+    .from('return_reports')
+    .insert(recordsToInsert)
+    .select();
+
+  if (error) {
+    throw new AppError(`Failed to save return report items: ${error.message}`, 400);
+  }
+
+  return data || [];
 };
 
