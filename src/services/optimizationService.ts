@@ -4,6 +4,7 @@ import { AppError } from '../utils/appError';
 export interface OptimizationRecommendation {
   ndc: string;
   productName: string;
+  quantity: number;
   recommendedDistributor: string;
   expectedPrice: number;
   available?: boolean;
@@ -285,6 +286,7 @@ export const getOptimizationRecommendations = async (
     recommendations.push({
       ndc,
       productName: productItem.product_name || `Product ${ndc}`,
+      quantity: productItem.quantity || 1,
       recommendedDistributor: recommended.name,
       expectedPrice: recommended.price,
       alternativeDistributors: alternatives, // Already mapped above

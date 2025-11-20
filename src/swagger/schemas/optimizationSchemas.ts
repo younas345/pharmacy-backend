@@ -15,6 +15,11 @@ export const optimizationSchemas = {
         example: -0.065,
         description: 'Price difference from recommended distributor (negative means cheaper)',
       },
+      available: {
+        type: 'boolean',
+        example: true,
+        description: 'Whether this distributor has recent data (within last 30 days)',
+      },
     },
   },
   OptimizationRecommendation: {
@@ -28,6 +33,11 @@ export const optimizationSchemas = {
         type: 'string',
         example: 'Amoxicillin 500mg Capsule',
       },
+      quantity: {
+        type: 'number',
+        example: 13,
+        description: 'Quantity of the product in the pharmacy list',
+      },
       recommendedDistributor: {
         type: 'string',
         example: 'XYZ Pharmaceutical Returns',
@@ -36,6 +46,11 @@ export const optimizationSchemas = {
         type: 'number',
         example: 0.92,
         description: 'Best price per unit from recommended distributor',
+      },
+      available: {
+        type: 'boolean',
+        example: true,
+        description: 'Whether the recommended distributor has recent data (within last 30 days)',
       },
       alternativeDistributors: {
         type: 'array',
