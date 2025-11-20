@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { processReturnReport } from '../services/returnReportService';
-import { createDocument } from '../services/documentsService';
+import { processReturnReport, saveReturnReport } from '../services/returnReportService';
+import { createDocument, uploadFileToStorage } from '../services/documentsService';
 import { findOrCreateReverseDistributor } from '../services/reverseDistributorsService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
@@ -46,6 +46,21 @@ export const processReturnReportHandler = catchAsync(
       }
     }
 
+    // Upload file to Supabase Storage
+    let fileUrl: string | undefined;
+    try {
+      fileUrl = await uploadFileToStorage({
+        fileBuffer: pdfBuffer,
+        fileName: req.file.originalname || 'document.pdf',
+        pharmacyId: pharmacyId,
+        fileType: req.file.mimetype,
+      });
+      console.log('✅ File uploaded to Supabase Storage:', fileUrl);
+    } catch (error: any) {
+      console.error('⚠️ Failed to upload file to storage:', error.message);
+      // Continue without file URL if upload fails
+    }
+
     // Save document to database
     let savedDocument;
     try {
@@ -54,6 +69,7 @@ export const processReturnReportHandler = catchAsync(
         file_name: req.file.originalname || 'document.pdf',
         file_size: req.file.size,
         file_type: req.file.mimetype,
+        file_url: fileUrl, // Include the file URL from Supabase Storage
         reverse_distributor_id: distributorId,
         source: 'manual_upload',
         extracted_items: structuredData.totalItems || structuredData.items?.length || 0,
@@ -64,6 +80,22 @@ export const processReturnReportHandler = catchAsync(
     } catch (error: any) {
       console.error('Failed to save document to database:', error);
       // Still return the processed data even if saving fails
+    }
+
+    // Save return report data to database (one record per item)
+    let savedReturnReports;
+    if (savedDocument?.id) {
+      try {
+        savedReturnReports = await saveReturnReport({
+          document_id: savedDocument.id,
+          pharmacy_id: pharmacyId,
+          data: structuredData,
+        });
+        console.log(`✅ Return report data saved: ${savedReturnReports.length} items stored as separate records`);
+      } catch (error: any) {
+        console.error('Failed to save return report data:', error);
+        // Continue even if saving return report fails
+      }
     }
 
     res.status(200).json({
