@@ -17,6 +17,7 @@ export interface UploadedDocument {
   extracted_items: number;
   total_credit_amount?: number;
   processing_progress?: number;
+  report_date?: string; // Date of the return report (YYYY-MM-DD format)
 }
 
 export const getDocuments = async (
@@ -146,6 +147,7 @@ export interface CreateDocumentInput {
   extracted_items?: number;
   total_credit_amount?: number;
   status?: 'uploading' | 'processing' | 'completed' | 'failed' | 'needs_review';
+  report_date?: string; // Date of the return report (YYYY-MM-DD format)
 }
 
 export interface UploadFileToStorageInput {
@@ -208,6 +210,7 @@ export const createDocument = async (input: CreateDocumentInput): Promise<Upload
     status: input.status || 'completed',
     extracted_items: input.extracted_items || 0,
     total_credit_amount: input.total_credit_amount,
+    report_date: input.report_date, // Save report date from extracted data
     processed_at: new Date().toISOString(),
   };
 

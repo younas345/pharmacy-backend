@@ -74,9 +74,10 @@ export const processReturnReportHandler = catchAsync(
         source: 'manual_upload',
         extracted_items: structuredData.totalItems || structuredData.items?.length || 0,
         total_credit_amount: structuredData.totalCreditAmount || 0,
+        report_date: structuredData.reportDate, // Save report date from extracted data
         status: 'completed',
       });
-      console.log('✅ Document saved with distributor ID:', distributorId);
+      console.log('✅ Document saved with distributor ID:', distributorId, 'and report date:', structuredData.reportDate);
     } catch (error: any) {
       console.error('Failed to save document to database:', error);
       // Still return the processed data even if saving fails

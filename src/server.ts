@@ -11,6 +11,7 @@ import dashboardRoutes from './routes/dashboardRoutes';
 import creditsRoutes from './routes/creditsRoutes';
 import documentsRoutes from './routes/documentsRoutes';
 import barcodeRoutes from './routes/barcodeRoutes';
+import optimizationRoutes from './routes/optimizationRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
@@ -86,6 +87,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/credits', creditsRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/barcode', barcodeRoutes);
+app.use('/api/optimization', optimizationRoutes);
 
 /**
  * @swagger
