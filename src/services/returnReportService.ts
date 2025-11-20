@@ -75,7 +75,11 @@ Return the data in this exact JSON structure:
       "expirationDate": "YYYY-MM-DD",
       "quantity": number,
       "creditAmount": number,
-      "pricePerUnit": number
+      "pricePerUnit": number,
+      "pharmacy": "pharmacy name if available",
+      "reportDate": "YYYY-MM-DD",
+      "creditReportNumber": "reference number",
+      "reverseDistributor": "reverse distributor name if available"
     }
   ],
   "totalCreditAmount": number,
