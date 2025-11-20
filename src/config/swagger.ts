@@ -7,7 +7,7 @@ const options: swaggerJsdoc.Options = {
     info: {
       title: 'Pharmacy Backend API',
       version: '1.0.0',
-      description: 'API documentation for Pharmacy Backend with authentication and return report processing endpoints',
+      description: 'API documentation for Pharmacy Backend with Supabase Auth authentication and return report processing endpoints. All authentication is handled through Supabase Auth, returning Supabase session tokens.',
       contact: {
         name: 'API Support',
       },
