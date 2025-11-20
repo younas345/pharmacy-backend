@@ -20,6 +20,14 @@ const options: swaggerJsdoc.Options = {
     ],
     components: {
       schemas: allSchemas,
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Enter Supabase JWT token obtained from /api/auth/signin endpoint',
+        },
+      },
     },
   },
   apis: ['./src/routes/*.ts', './src/controllers/*.ts', './src/server.ts', './src/middleware/*.ts'],

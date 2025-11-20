@@ -1,164 +1,43 @@
 import { Router } from 'express';
 import {
-  getDefaultProductListHandler,
-  addItemHandler,
-  removeItemHandler,
-  getProductListsHandler,
-  createProductListHandler,
   getProductListItemsHandler,
   addProductListItemHandler,
+  removeItemHandler,
 } from '../controllers/productListsController';
+import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
-/**
- * @swagger
- * /api/product-lists/default:
- *   get:
- *     summary: Get default product list (My Products)
- *     tags: [Product Lists]
- *     parameters:
- *       - in: query
- *         name: pharmacy_id
- *         schema:
- *           type: string
- *           format: uuid
- *         required: true
- *         description: Pharmacy ID
- *     responses:
- *       200:
- *         description: Default product list with items
- */
-router.get('/default', getDefaultProductListHandler);
-
-/**
- * @swagger
- * /api/product-lists:
- *   get:
- *     summary: Get all product lists
- *     tags: [Product Lists]
- *     parameters:
- *       - in: query
- *         name: pharmacy_id
- *         schema:
- *           type: string
- *           format: uuid
- *         required: true
- *         description: Pharmacy ID
- *     responses:
- *       200:
- *         description: List of product lists
- */
-router.get('/', getProductListsHandler);
-
-/**
- * @swagger
- * /api/product-lists:
- *   post:
- *     summary: Create a new product list
- *     tags: [Product Lists]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - pharmacy_id
- *               - name
- *             properties:
- *               pharmacy_id:
- *                 type: string
- *                 format: uuid
- *               name:
- *                 type: string
- *               items:
- *                 type: array
- *                 items:
- *                   type: object
- *     responses:
- *       201:
- *         description: Product list created
- */
-router.post('/', createProductListHandler);
-
-/**
- * @swagger
- * /api/product-lists/items/add:
- *   post:
- *     summary: Add item to product list (requires list_id)
- *     tags: [Product Lists]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - pharmacy_id
- *               - list_id
- *               - ndc
- *               - product_name
- *               - quantity
- *             properties:
- *               pharmacy_id:
- *                 type: string
- *               list_id:
- *                 type: string
- *               ndc:
- *                 type: string
- *               product_name:
- *                 type: string
- *               quantity:
- *                 type: number
- *               lot_number:
- *                 type: string
- *               expiration_date:
- *                 type: string
- *               notes:
- *                 type: string
- *     responses:
- *       201:
- *         description: Item added to list
- */
-router.post('/items/add', addItemHandler);
-
-/**
- * @swagger
- * /api/product-lists/items/{id}:
- *   delete:
- *     summary: Remove item from product list
- *     tags: [Product Lists]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: Item ID
- *     responses:
- *       200:
- *         description: Item removed
- */
-router.delete('/items/:id', removeItemHandler);
+// Apply authentication middleware to all routes
+router.use(authenticate);
 
 /**
  * @swagger
  * /api/product-lists/items:
  *   get:
- *     summary: Get all product list items directly (simplified API)
+ *     summary: Get all product list items for a pharmacy
  *     tags: [Product Lists]
- *     parameters:
- *       - in: query
- *         name: pharmacy_id
- *         schema:
- *           type: string
- *           format: uuid
- *         required: true
- *         description: Pharmacy ID
+ *     security:
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: List of product list items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ProductListItemsResponse'
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get('/items', getProductListItemsHandler);
 
@@ -166,39 +45,75 @@ router.get('/items', getProductListItemsHandler);
  * @swagger
  * /api/product-lists/items:
  *   post:
- *     summary: Add product list item directly (simplified API - auto-creates list if needed)
+ *     summary: Add product list item
  *     tags: [Product Lists]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - pharmacy_id
- *               - ndc
- *               - product_name
- *               - quantity
- *             properties:
- *               pharmacy_id:
- *                 type: string
- *               ndc:
- *                 type: string
- *               product_name:
- *                 type: string
- *               quantity:
- *                 type: number
- *               lot_number:
- *                 type: string
- *               expiration_date:
- *                 type: string
- *               notes:
- *                 type: string
+ *             $ref: '#/components/schemas/AddProductListItemRequest'
  *     responses:
  *       201:
- *         description: Item added to product list
+ *         description: Item added to product list successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ProductListItemResponse'
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       400:
+ *         description: Bad request (missing required fields)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/items', addProductListItemHandler);
+
+/**
+ * @swagger
+ * /api/product-lists/items/{id}:
+ *   delete:
+ *     summary: Remove item from product list
+ *     tags: [Product Lists]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Item ID
+ *     responses:
+ *       200:
+ *         description: Item removed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/RemoveItemResponse'
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.delete('/items/:id', removeItemHandler);
 
 export default router;
 
