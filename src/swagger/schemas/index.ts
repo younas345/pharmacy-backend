@@ -6,6 +6,7 @@ import { returnsSchemas } from './returnsSchemas';
 import { productsSchemas } from './productsSchemas';
 import { creditsSchemas } from './creditsSchemas';
 import { documentsSchemas } from './documentsSchemas';
+import { productListsSchemas } from './productListsSchemas';
 
 export const allSchemas = {
   ...authSchemas,
@@ -16,5 +17,6 @@ export const allSchemas = {
   ...productsSchemas,
   ...creditsSchemas,
   ...documentsSchemas,
+  ...productListsSchemas,
 };
 
