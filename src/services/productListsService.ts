@@ -3,7 +3,6 @@ import { AppError } from '../utils/appError';
 
 export interface ProductListItem {
   id: string;
-  product_list_id?: string | null;
   ndc: string;
   product_name: string;
   quantity: number;
@@ -42,7 +41,6 @@ export const addProductListItem = async (
   const { data, error } = await db
     .from('product_list_items')
     .insert({
-      product_list_id: null, // No list dependency
       ndc: item.ndc,
       product_name: item.product_name,
       quantity: item.quantity,
@@ -51,7 +49,7 @@ export const addProductListItem = async (
       notes: item.notes,
       added_by: pharmacyId,
     })
-    .select()
+    .select('id, ndc, product_name, quantity, lot_number, expiration_date, notes, added_at, added_by')
     .single();
 
   if (error) {
@@ -92,7 +90,7 @@ export const getProductListItems = async (pharmacyId: string): Promise<ProductLi
   // Get all items for this pharmacy (filtered by added_by)
   const { data: items, error } = await db
     .from('product_list_items')
-    .select('*')
+    .select('id, ndc, product_name, quantity, lot_number, expiration_date, notes, added_at, added_by')
     .eq('added_by', pharmacyId)
     .order('added_at', { ascending: false });
 

@@ -131,7 +131,6 @@ CREATE TABLE IF NOT EXISTS product_lists (
 -- Product List Items Table
 CREATE TABLE IF NOT EXISTS product_list_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  product_list_id UUID NOT NULL REFERENCES product_lists(id) ON DELETE CASCADE,
   ndc VARCHAR(50) NOT NULL,
   product_name VARCHAR(500),
   quantity INTEGER,
