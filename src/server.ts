@@ -3,13 +3,69 @@ import dotenv from 'dotenv';
 import swaggerUi from 'swagger-ui-express';
 import authRoutes from './routes/authRoutes';
 import returnReportRoutes from './routes/returnReportRoutes';
+import inventoryRoutes from './routes/inventoryRoutes';
+import returnsRoutes from './routes/returnsRoutes';
+import productsRoutes from './routes/productsRoutes';
+import productListsRoutes from './routes/productListsRoutes';
+import dashboardRoutes from './routes/dashboardRoutes';
+import creditsRoutes from './routes/creditsRoutes';
+import documentsRoutes from './routes/documentsRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
+import cors from 'cors';
 
 dotenv.config({ path: '.env.local' });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// CORS Configuration
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  process.env.FRONTEND_URL,
+].filter(Boolean) as string[];
+
+app.use(cors({
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow requests with no origin (like mobile apps, Postman, or curl)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // In development, allow all localhost origins
+    if (process.env.NODE_ENV !== 'production') {
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return callback(null, true);
+      }
+    }
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // For production, you might want to be more strict
+    if (process.env.NODE_ENV === 'production') {
+      return callback(new Error('Not allowed by CORS'));
+    }
+    
+    callback(null, true);
+  },
+  credentials: true, // Allow cookies/auth headers
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+  ],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400, // 24 hours
+}));
 
 // Middleware
 app.use(express.json());
@@ -21,6 +77,13 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/return-reports', returnReportRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/returns', returnsRoutes);
+app.use('/api/products', productsRoutes);
+app.use('/api/product-lists', productListsRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/credits', creditsRoutes);
+app.use('/api/documents', documentsRoutes);
 
 /**
  * @swagger
