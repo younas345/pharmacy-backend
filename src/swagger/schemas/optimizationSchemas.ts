@@ -47,6 +47,11 @@ export const optimizationSchemas = {
         example: 0.92,
         description: 'Best price per unit from recommended distributor',
       },
+      worstPrice: {
+        type: 'number',
+        example: 0.855,
+        description: 'Worst (lowest) price per unit among all distributors',
+      },
       available: {
         type: 'boolean',
         example: true,
@@ -90,6 +95,46 @@ export const optimizationSchemas = {
             type: 'string',
             format: 'date-time',
             example: '2024-02-15T10:00:00Z',
+          },
+          distributorUsage: {
+            type: 'object',
+            properties: {
+              usedThisMonth: {
+                type: 'number',
+                example: 2,
+                description: 'Number of distributors used this month',
+              },
+              totalDistributors: {
+                type: 'number',
+                example: 5,
+                description: 'Total number of active distributors',
+              },
+              stillAvailable: {
+                type: 'number',
+                example: 3,
+                description: 'Number of distributors still available this month',
+              },
+            },
+          },
+          earningsComparison: {
+            type: 'object',
+            properties: {
+              singleDistributorStrategy: {
+                type: 'number',
+                example: 80.32,
+                description: 'Earnings using only the best recommended distributor',
+              },
+              multipleDistributorsStrategy: {
+                type: 'number',
+                example: 108.43,
+                description: 'Earnings using all available distributors this month',
+              },
+              potentialAdditionalEarnings: {
+                type: 'number',
+                example: 28.11,
+                description: 'Potential additional earnings by using multiple distributors',
+              },
+            },
           },
         },
       },

@@ -7,6 +7,7 @@ export interface OptimizationRecommendation {
   quantity: number;
   recommendedDistributor: string;
   expectedPrice: number;
+  worstPrice: number;
   available?: boolean;
   alternativeDistributors: Array<{
     name: string;
@@ -21,6 +22,16 @@ export interface OptimizationResponse {
   recommendations: OptimizationRecommendation[];
   totalPotentialSavings: number;
   generatedAt: string;
+  distributorUsage: {
+    usedThisMonth: number;
+    totalDistributors: number;
+    stillAvailable: number;
+  };
+  earningsComparison: {
+    singleDistributorStrategy: number;
+    multipleDistributorsStrategy: number;
+    potentialAdditionalEarnings: number;
+  };
 }
 
 // Get optimization recommendations for pharmacy products
@@ -44,10 +55,28 @@ export const getOptimizationRecommendations = async (
   }
 
   if (!productItems || productItems.length === 0) {
+    // Get total active distributors for empty response
+    const { data: allActiveDistributors } = await db
+      .from('reverse_distributors')
+      .select('id')
+      .eq('is_active', true);
+    
+    const totalDistributors = allActiveDistributors?.length || 0;
+    
     return {
       recommendations: [],
       totalPotentialSavings: 0,
       generatedAt: new Date().toISOString(),
+      distributorUsage: {
+        usedThisMonth: 0,
+        totalDistributors,
+        stillAvailable: totalDistributors,
+      },
+      earningsComparison: {
+        singleDistributorStrategy: 0,
+        multipleDistributorsStrategy: 0,
+        potentialAdditionalEarnings: 0,
+      },
     };
   }
 
@@ -289,6 +318,7 @@ export const getOptimizationRecommendations = async (
       quantity: productItem.quantity || 1,
       recommendedDistributor: recommended.name,
       expectedPrice: recommended.price,
+      worstPrice: worstPrice,
       alternativeDistributors: alternatives, // Already mapped above
       savings: Math.max(0, savings), // Ensure non-negative
     });
@@ -370,10 +400,111 @@ export const getOptimizationRecommendations = async (
     });
   });
 
+  // Calculate distributor usage statistics
+  // Get total active distributors
+  const { data: allActiveDistributors, error: allDistError } = await db
+    .from('reverse_distributors')
+    .select('id')
+    .eq('is_active', true);
+
+  const totalDistributors = allActiveDistributors?.length || 0;
+
+  // Get distributors used this month (distributors with uploaded_documents in current month)
+  const now = new Date();
+  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+  const { data: usedDistributors, error: usedDistError } = await db
+    .from('uploaded_documents')
+    .select('reverse_distributor_id')
+    .eq('pharmacy_id', pharmacyId)
+    .not('reverse_distributor_id', 'is', null)
+    .gte('report_date', firstDayOfMonth.toISOString().split('T')[0])
+    .lte('report_date', lastDayOfMonth.toISOString().split('T')[0]);
+
+  const uniqueUsedDistributorIds = new Set(
+    (usedDistributors || [])
+      .map((d: any) => d.reverse_distributor_id)
+      .filter((id: string) => id !== null)
+  );
+  const usedThisMonth = uniqueUsedDistributorIds.size;
+  const stillAvailable = Math.max(0, totalDistributors - usedThisMonth);
+
+  // Create a map to check if a distributor (by name) is still available this month
+  // A distributor is "still available this month" if it hasn't been used this month
+  const distributorNameToStillAvailableMap: Record<string, boolean> = {};
+  
+  // Check each distributor name against the used distributor IDs
+  for (const distributorName of distributorNames) {
+    const distributorId = distributorNameToIdMap[distributorName];
+    if (distributorId) {
+      // If distributor ID is NOT in the used list, it's still available this month
+      distributorNameToStillAvailableMap[distributorName] = !uniqueUsedDistributorIds.has(distributorId);
+    } else {
+      // If we don't have an ID, assume it's available
+      distributorNameToStillAvailableMap[distributorName] = true;
+    }
+  }
+
+  // Calculate earnings comparison
+  // Single Distributor Strategy: Using only the best recommended distributor for all products
+  let singleDistributorStrategy = 0;
+  recommendations.forEach((rec) => {
+    singleDistributorStrategy += rec.expectedPrice * rec.quantity;
+  });
+
+  // Multiple Distributors Strategy: Using the best distributor that's still available this month for each product
+  // This allows using different distributors for different products to maximize earnings
+  let multipleDistributorsStrategy = 0;
+
+  recommendations.forEach((rec) => {
+    // Find the best distributor that's still available this month (including recommended and alternatives)
+    const allOptions = [
+      { 
+        name: rec.recommendedDistributor, 
+        price: rec.expectedPrice, 
+        stillAvailableThisMonth: distributorNameToStillAvailableMap[rec.recommendedDistributor] ?? false 
+      },
+      ...rec.alternativeDistributors.map((alt) => ({
+        name: alt.name,
+        price: alt.price,
+        stillAvailableThisMonth: distributorNameToStillAvailableMap[alt.name] ?? false,
+      })),
+    ];
+
+    // Filter to only distributors still available this month and sort by price (highest first)
+    const availableThisMonthOptions = allOptions
+      .filter((opt) => opt.stillAvailableThisMonth)
+      .sort((a, b) => b.price - a.price);
+
+    if (availableThisMonthOptions.length > 0) {
+      // Use the best distributor that's still available this month
+      const bestAvailable = availableThisMonthOptions[0];
+      const earnings = bestAvailable.price * rec.quantity;
+      multipleDistributorsStrategy += earnings;
+    } else {
+      // If no distributors are still available this month, use the recommended one anyway
+      const earnings = rec.expectedPrice * rec.quantity;
+      multipleDistributorsStrategy += earnings;
+    }
+  });
+
+  const potentialAdditionalEarnings = Math.max(0, multipleDistributorsStrategy - singleDistributorStrategy);
+
   return {
     recommendations,
     totalPotentialSavings,
     generatedAt: new Date().toISOString(),
+    distributorUsage: {
+      usedThisMonth,
+      totalDistributors,
+      stillAvailable,
+    },
+    earningsComparison: {
+      singleDistributorStrategy: Math.round(singleDistributorStrategy * 100) / 100,
+      multipleDistributorsStrategy: Math.round(multipleDistributorsStrategy * 100) / 100,
+      potentialAdditionalEarnings: Math.round(potentialAdditionalEarnings * 100) / 100,
+    },
   };
 };
 
