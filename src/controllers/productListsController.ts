@@ -3,6 +3,7 @@ import {
   getProductListItems,
   addProductListItem,
   removeItemFromProductList,
+  clearAllProductListItems,
 } from '../services/productListsService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
@@ -64,6 +65,26 @@ export const removeItemHandler = catchAsync(
     res.status(200).json({
       status: 'success',
       message: 'Item removed successfully',
+    });
+  }
+);
+
+// Clear all product list items for a pharmacy
+export const clearAllProductListItemsHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId;
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
+    const result = await clearAllProductListItems(pharmacyId);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'All product list items cleared successfully',
+      data: {
+        deletedCount: result.deletedCount,
+      },
     });
   }
 );

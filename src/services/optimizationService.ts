@@ -16,6 +16,7 @@ export interface OptimizationRecommendation {
     available?: boolean;
   }>;
   savings: number;
+  _distributorAverages?: Array<{ name: string; price: number }>; // Temporary storage for availability check
 }
 
 export interface OptimizationResponse {
@@ -290,49 +291,33 @@ export const getOptimizationRecommendations = async (
     // Sort by price (highest first = best) - highest price means highest credit/return value
     distributorAverages.sort((a, b) => b.price - a.price);
 
-    const recommended = distributorAverages[0]; // Highest price = best
-    // Show ALL alternatives, not just one
-    const alternatives = distributorAverages.slice(1).map((alt) => ({
-      name: alt.name,
-      price: alt.price,
-      difference: alt.price - recommended.price, // Negative means lower price (worse)
-    }));
+    // Store distributor averages for later use (before availability check)
+    const allDistributorsSorted = distributorAverages;
 
     // Debug: Log final results
     console.log(`📊 Final result for NDC ${ndc}:`);
     console.log(`   - Total distributors: ${distributorAverages.length}`);
-    console.log(`   - Recommended: "${recommended.name}" at $${recommended.price}`);
-    console.log(`   - Alternatives: ${alternatives.length}`);
-    alternatives.forEach((alt, i) => {
-      console.log(`     ${i+1}. "${alt.name}" at $${alt.price} (diff: ${alt.difference >= 0 ? '+' : ''}${alt.difference})`);
-    });
     console.log(`--- End NDC ${ndc} ---\n`);
 
-    // Calculate savings (difference between best (highest) and worst (lowest) price, multiplied by quantity)
-    const worstPrice = distributorAverages[distributorAverages.length - 1].price; // Lowest price
-    const savings = (recommended.price - worstPrice) * (productItem.quantity || 1);
-
+    // Store the distributor averages for this NDC (we'll select recommended after availability check)
     recommendations.push({
       ndc,
       productName: productItem.product_name || `Product ${ndc}`,
       quantity: productItem.quantity || 1,
-      recommendedDistributor: recommended.name,
-      expectedPrice: recommended.price,
-      worstPrice: worstPrice,
-      alternativeDistributors: alternatives, // Already mapped above
-      savings: Math.max(0, savings), // Ensure non-negative
+      recommendedDistributor: '', // Will be set after availability check
+      expectedPrice: 0, // Will be set after availability check
+      worstPrice: distributorAverages[distributorAverages.length - 1].price, // Lowest price
+      alternativeDistributors: [], // Will be set after availability check
+      savings: 0, // Will be calculated after availability check
+      _distributorAverages: allDistributorsSorted, // Temporary storage for availability check
     });
   });
 
-  // Calculate total potential savings
-  const totalPotentialSavings = recommendations.reduce((sum, rec) => sum + rec.savings, 0);
-
-  // Collect all unique distributor names from recommendations
+  // Collect all unique distributor names from recommendations (before availability check)
   const distributorNames = new Set<string>();
   recommendations.forEach((rec) => {
-    distributorNames.add(rec.recommendedDistributor);
-    rec.alternativeDistributors.forEach((alt) => {
-      distributorNames.add(alt.name);
+    rec._distributorAverages?.forEach((dist) => {
+      distributorNames.add(dist.name);
     });
   });
 
@@ -375,8 +360,8 @@ export const getOptimizationRecommendations = async (
       .limit(1);
 
     if (docError || !recentDocuments || recentDocuments.length === 0 || !recentDocuments[0]?.report_date) {
-      // No data found, mark as unavailable
-      distributorAvailabilityMap[distributorName] = false;
+      // No data found, mark as available (no recent activity)
+      distributorAvailabilityMap[distributorName] = true;
       continue;
     }
 
@@ -385,20 +370,73 @@ export const getOptimizationRecommendations = async (
     // Check if report_date is within last 30 days
     const reportDate = new Date(recentDocument.report_date);
     const today = new Date();
-    const daysDiff = Math.floor((today.getTime() - reportDate.getTime()) / (1000 * 60 * 60 * 24));
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+    const reportDateStr = reportDate.toISOString().split('T')[0];
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
     
-    // If within 30 days, mark as unavailable (data is too recent, might not be current)
-    // Otherwise, mark as available (data is older, likely still valid)
-    distributorAvailabilityMap[distributorName] = daysDiff > 30;
+    // If report_date is within last 30 days, mark as unavailable (active = false)
+    // Otherwise, mark as available (active = true)
+    distributorAvailabilityMap[distributorName] = reportDateStr < thirtyDaysAgoStr;
   }
 
-  // Add availability flags to recommendations
+  // Now update recommendations: select highest available price as recommended
   recommendations.forEach((rec) => {
-    rec.available = distributorAvailabilityMap[rec.recommendedDistributor] ?? false;
-    rec.alternativeDistributors.forEach((alt) => {
-      alt.available = distributorAvailabilityMap[alt.name] ?? false;
-    });
+    if (!rec._distributorAverages || rec._distributorAverages.length === 0) {
+      return;
+    }
+
+    // Find the highest price distributor that IS available
+    let recommended: { name: string; price: number } | null = null;
+    const alternatives: Array<{ name: string; price: number; difference: number; available: boolean }> = [];
+
+    // First, find the highest available distributor
+    for (const dist of rec._distributorAverages) {
+      const isAvailable = distributorAvailabilityMap[dist.name] ?? false;
+      
+      if (!recommended && isAvailable) {
+        // First available distributor (which is also highest price since sorted)
+        recommended = dist;
+        break; // Found the recommended one
+      }
+    }
+
+    // If no available distributor found, use the highest price one anyway (even if unavailable)
+    if (!recommended && rec._distributorAverages.length > 0) {
+      recommended = rec._distributorAverages[0];
+    }
+
+    // Now build alternatives list (all distributors except the recommended one)
+    if (recommended) {
+      rec._distributorAverages.forEach((dist) => {
+        if (dist.name !== recommended!.name) {
+          alternatives.push({
+            name: dist.name,
+            price: dist.price,
+            difference: dist.price - recommended!.price, // Negative means lower price (worse)
+            available: distributorAvailabilityMap[dist.name] ?? false,
+          });
+        }
+      });
+    }
+
+    if (recommended) {
+      rec.recommendedDistributor = recommended.name;
+      rec.expectedPrice = recommended.price;
+      rec.available = distributorAvailabilityMap[recommended.name] ?? false;
+      rec.alternativeDistributors = alternatives;
+      
+      // Calculate savings (difference between recommended and worst price)
+      const worstPrice = rec.worstPrice;
+      rec.savings = Math.max(0, (recommended.price - worstPrice) * (rec.quantity || 1));
+    }
+
+    // Remove temporary storage
+    delete (rec as any)._distributorAverages;
   });
+
+  // Calculate total potential savings after updating recommendations
+  const totalPotentialSavings = recommendations.reduce((sum, rec) => sum + rec.savings, 0);
 
   // Calculate distributor usage statistics
   // Get total active distributors
@@ -409,41 +447,78 @@ export const getOptimizationRecommendations = async (
 
   const totalDistributors = allActiveDistributors?.length || 0;
 
-  // Get distributors used this month (distributors with uploaded_documents in current month)
+  // Get distributors used this month (distributors with last document's report_date within last 30 days)
+  // Use the same logic as top distributors: order by report_date DESC and check if latest is within 30 days
   const now = new Date();
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(now.getDate() - 30);
+  const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
 
-  const { data: usedDistributors, error: usedDistError } = await db
-    .from('uploaded_documents')
-    .select('reverse_distributor_id')
-    .eq('pharmacy_id', pharmacyId)
-    .not('reverse_distributor_id', 'is', null)
-    .gte('report_date', firstDayOfMonth.toISOString().split('T')[0])
-    .lte('report_date', lastDayOfMonth.toISOString().split('T')[0]);
+  // Get all active distributors and check their last document's report_date
+  const uniqueUsedDistributorIds = new Set<string>();
+  
+  if (allActiveDistributors && allActiveDistributors.length > 0) {
+    for (const dist of allActiveDistributors) {
+      // Get the most recent document for this pharmacy and distributor (by report_date)
+      const { data: lastDocument, error: docError } = await db
+        .from('uploaded_documents')
+        .select('report_date')
+        .eq('pharmacy_id', pharmacyId)
+        .eq('reverse_distributor_id', dist.id)
+        .not('report_date', 'is', null)
+        .order('report_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-  const uniqueUsedDistributorIds = new Set(
-    (usedDistributors || [])
-      .map((d: any) => d.reverse_distributor_id)
-      .filter((id: string) => id !== null)
-  );
+      if (!docError && lastDocument && lastDocument.report_date) {
+        const reportDateStr = new Date(lastDocument.report_date).toISOString().split('T')[0];
+        // If last document's report_date is within last 30 days, mark as used
+        if (reportDateStr >= thirtyDaysAgoStr) {
+          uniqueUsedDistributorIds.add(dist.id);
+        }
+      }
+    }
+  }
+
   const usedThisMonth = uniqueUsedDistributorIds.size;
   const stillAvailable = Math.max(0, totalDistributors - usedThisMonth);
 
   // Create a map to check if a distributor (by name) is still available this month
-  // A distributor is "still available this month" if it hasn't been used this month
+  // A distributor is "still available this month" if last document's report_date is NOT within last 30 days
   const distributorNameToStillAvailableMap: Record<string, boolean> = {};
   
-  // Check each distributor name against the used distributor IDs
+  // Check each distributor name - use same logic: order by report_date DESC and check latest
   for (const distributorName of distributorNames) {
     const distributorId = distributorNameToIdMap[distributorName];
-    if (distributorId) {
-      // If distributor ID is NOT in the used list, it's still available this month
-      distributorNameToStillAvailableMap[distributorName] = !uniqueUsedDistributorIds.has(distributorId);
-    } else {
+    
+    if (!distributorId) {
       // If we don't have an ID, assume it's available
       distributorNameToStillAvailableMap[distributorName] = true;
+      continue;
     }
+
+    // Get the most recent document for this pharmacy and distributor (by report_date)
+    const { data: lastDocument, error: docError } = await db
+      .from('uploaded_documents')
+      .select('report_date')
+      .eq('pharmacy_id', pharmacyId)
+      .eq('reverse_distributor_id', distributorId)
+      .not('report_date', 'is', null)
+      .order('report_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (docError || !lastDocument || !lastDocument.report_date) {
+      // No document found, mark as available
+      distributorNameToStillAvailableMap[distributorName] = true;
+      continue;
+    }
+
+    // Check if last document's report_date is within last 30 days
+    const reportDateStr = new Date(lastDocument.report_date).toISOString().split('T')[0];
+    // If within 30 days, NOT available (used this month)
+    // If older than 30 days, available (still available this month)
+    distributorNameToStillAvailableMap[distributorName] = reportDateStr < thirtyDaysAgoStr;
   }
 
   // Calculate earnings comparison
