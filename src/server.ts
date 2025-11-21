@@ -12,6 +12,7 @@ import creditsRoutes from './routes/creditsRoutes';
 import documentsRoutes from './routes/documentsRoutes';
 import barcodeRoutes from './routes/barcodeRoutes';
 import optimizationRoutes from './routes/optimizationRoutes';
+import distributorsRoutes from './routes/distributorsRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
@@ -88,6 +89,7 @@ app.use('/api/credits', creditsRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/barcode', barcodeRoutes);
 app.use('/api/optimization', optimizationRoutes);
+app.use('/api/distributors', distributorsRoutes);
 
 /**
  * @swagger

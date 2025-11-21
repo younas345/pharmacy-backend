@@ -8,6 +8,7 @@ import { creditsSchemas } from './creditsSchemas';
 import { documentsSchemas } from './documentsSchemas';
 import { productListsSchemas } from './productListsSchemas';
 import { optimizationSchemas } from './optimizationSchemas';
+import { distributorsSchemas } from './distributorsSchemas';
 
 export const allSchemas = {
   ...authSchemas,
@@ -20,5 +21,6 @@ export const allSchemas = {
   ...documentsSchemas,
   ...productListsSchemas,
   ...optimizationSchemas,
+  ...distributorsSchemas,
 };
 

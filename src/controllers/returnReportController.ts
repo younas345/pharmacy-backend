@@ -35,10 +35,30 @@ export const processReturnReportHandler = catchAsync(
 
     // Find or create reverse distributor from processed data
     let distributorId = reverseDistributorId;
-    if (!distributorId && structuredData.reverseDistributor) {
+    
+    // Use reverseDistributorInfo if available, otherwise fall back to reverseDistributor name
+    const distributorName = structuredData.reverseDistributorInfo?.name || structuredData.reverseDistributor;
+    
+    if (!distributorId && distributorName) {
       try {
-        console.log('🔍 Looking for reverse distributor:', structuredData.reverseDistributor);
-        distributorId = await findOrCreateReverseDistributor(structuredData.reverseDistributor);
+        console.log('🔍 Looking for reverse distributor:', distributorName);
+        
+        // Prepare distributor info for saving
+        const distributorInfo = structuredData.reverseDistributorInfo || 
+          (structuredData.reverseDistributor ? { name: structuredData.reverseDistributor } : undefined);
+        
+        // Log what we're about to save
+        if (distributorInfo) {
+          console.log('📦 Distributor Info to Save:');
+          console.log('   Name:', distributorInfo.name);
+          console.log('   Email:', distributorInfo.contactEmail || 'Not provided');
+          console.log('   Phone:', distributorInfo.contactPhone || 'Not provided');
+          console.log('   Address:', distributorInfo.address ? JSON.stringify(distributorInfo.address) : 'Not provided');
+          console.log('   Portal URL:', distributorInfo.portalUrl || 'Not provided');
+          console.log('   Supported Formats:', distributorInfo.supportedFormats || 'Not provided');
+        }
+        
+        distributorId = await findOrCreateReverseDistributor(distributorName, distributorInfo);
         console.log('✅ Reverse distributor ID:', distributorId);
       } catch (error: any) {
         console.error('⚠️ Failed to find/create reverse distributor:', error.message);
