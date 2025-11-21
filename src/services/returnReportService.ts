@@ -136,6 +136,72 @@ Extract all available information accurately. Be thorough with NDC codes and pri
   }
 };
 
+// Generate fake distributor names
+const generateFakeDistributorName = (): string => {
+  const distributors = [
+    'MedReturn Solutions Inc.',
+    'PharmaCredit Distributors',
+    'RxReturn Services LLC',
+    'Healthcare Returns Group',
+    'Pharmacy Credit Solutions',
+    'MedSupply Returns Co.',
+    'RxCredit Distributors',
+    'PharmaReturn Network',
+    'Healthcare Credit Services',
+    'MedReturn Partners',
+  ];
+  return distributors[Math.floor(Math.random() * distributors.length)];
+};
+
+// Generate fake price per unit (realistic range for pharmacy returns: $0.10 to $50.00)
+const generateFakePricePerUnit = (): number => {
+  // Generate price between $0.10 and $50.00 with 2 decimal places
+  const min = 0.10;
+  const max = 50.00;
+  const price = Math.random() * (max - min) + min;
+  return Math.round(price * 100) / 100;
+};
+
+// Replace real prices and distributor name with fake ones
+const fakePricesAndDistributor = (data: ReturnReportData): ReturnReportData => {
+  // Generate a fake distributor name
+  const fakeDistributorName = generateFakeDistributorName();
+  
+  // Replace distributor name
+  data.reverseDistributor = fakeDistributorName;
+  
+  // Replace prices for each item
+  let totalCreditAmount = 0;
+  
+  if (data.items && data.items.length > 0) {
+    data.items = data.items.map((item) => {
+      // Generate fake price per unit
+      const fakePricePerUnit = generateFakePricePerUnit();
+      
+      // Calculate fake credit amount based on quantity
+      const quantity = item.quantity || 1;
+      const fakeCreditAmount = Math.round(fakePricePerUnit * quantity * 100) / 100;
+      
+      // Update item with fake prices
+      const fakeItem = {
+        ...item,
+        pricePerUnit: fakePricePerUnit,
+        creditAmount: fakeCreditAmount,
+        reverseDistributor: fakeDistributorName, // Also update in item if present
+      };
+      
+      totalCreditAmount += fakeCreditAmount;
+      
+      return fakeItem;
+    });
+    
+    // Update total credit amount
+    data.totalCreditAmount = Math.round(totalCreditAmount * 100) / 100;
+  }
+  
+  return data;
+};
+
 export const processReturnReport = async (pdfBuffer: Buffer): Promise<ReturnReportData> => {
   // Step 1: Extract text from PDF
   const pdfText = await extractTextFromPDF(pdfBuffer);
@@ -147,7 +213,20 @@ export const processReturnReport = async (pdfBuffer: Buffer): Promise<ReturnRepo
   // Step 2: Extract structured data using Azure OpenAI
   const structuredData = await extractStructuredData(pdfText);
 
-  return structuredData;
+  // Step 3: Toggle between fake and real data
+  // Set USE_FAKE_DATA=true in .env to enable fake prices and distributor names
+  // Set USE_FAKE_DATA=false or omit it to use real extracted data
+  const useFakeData = process.env.USE_FAKE_DATA === 'true' || process.env.USE_FAKE_DATA === '1';
+  
+  if (useFakeData) {
+    // Replace real prices and distributor name with fake ones
+    const fakedData = fakePricesAndDistributor(structuredData);
+    console.log('🔧 Faked prices and distributor name for processed report');
+    return fakedData;
+  } else {
+    console.log('✅ Using real extracted data (no faking)');
+    return structuredData;
+  }
 };
 
 export interface SaveReturnReportInput {
