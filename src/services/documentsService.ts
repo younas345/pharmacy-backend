@@ -227,3 +227,82 @@ export const createDocument = async (input: CreateDocumentInput): Promise<Upload
   return data;
 };
 
+/**
+ * Download file from Supabase Storage
+ */
+export const downloadFileFromStorage = async (
+  pharmacyId: string,
+  documentId: string
+): Promise<{ buffer: Buffer; fileName: string; contentType: string }> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+  const storage = supabaseAdmin.storage;
+  const bucketName = 'documents';
+
+  // First, get document info to verify ownership and get file path
+  const { data: document, error: docError } = await db
+    .from('uploaded_documents')
+    .select('id, file_name, file_url, file_type, pharmacy_id')
+    .eq('id', documentId)
+    .eq('pharmacy_id', pharmacyId)
+    .single();
+
+  if (docError || !document) {
+    throw new AppError('Document not found', 404);
+  }
+
+  if (!document.file_url) {
+    throw new AppError('File URL not found for this document', 404);
+  }
+
+  // Extract file path from URL
+  // URL format: https://[project].supabase.co/storage/v1/object/public/documents/[pharmacyId]/[timestamp]-[filename]
+  // Or: https://[project].supabase.co/storage/v1/object/sign/documents/[path]?token=...
+  let filePath: string;
+  
+  try {
+    const url = new URL(document.file_url);
+    const pathParts = url.pathname.split('/');
+    const documentsIndex = pathParts.findIndex((part: string) => part === 'documents');
+    
+    if (documentsIndex === -1 || documentsIndex === pathParts.length - 1) {
+      throw new AppError('Invalid file URL format', 400);
+    }
+    
+    // Get path after 'documents' folder
+    filePath = pathParts.slice(documentsIndex + 1).join('/');
+  } catch (error) {
+    // If URL parsing fails, try simple string extraction
+    const urlParts = document.file_url.split('/');
+    const pathIndex = urlParts.findIndex((part: string) => part === 'documents');
+    if (pathIndex === -1 || pathIndex === urlParts.length - 1) {
+      throw new AppError('Invalid file URL format', 400);
+    }
+    filePath = urlParts.slice(pathIndex + 1).join('/');
+    // Remove query parameters if any
+    filePath = filePath.split('?')[0];
+  }
+
+  // Download file from Supabase Storage
+  const { data: fileData, error: downloadError } = await storage
+    .from(bucketName)
+    .download(filePath);
+
+  if (downloadError || !fileData) {
+    throw new AppError(`Failed to download file: ${downloadError?.message || 'Unknown error'}`, 400);
+  }
+
+  // Convert Blob to Buffer
+  const arrayBuffer = await fileData.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  return {
+    buffer,
+    fileName: document.file_name,
+    contentType: document.file_type || 'application/pdf',
+  };
+};
+
