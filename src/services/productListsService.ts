@@ -101,3 +101,36 @@ export const getProductListItems = async (pharmacyId: string): Promise<ProductLi
   return items || [];
 };
 
+// Clear all product list items for a pharmacy
+export const clearAllProductListItems = async (pharmacyId: string): Promise<{ deletedCount: number }> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  // First, get count of items to be deleted
+  const { count, error: countError } = await db
+    .from('product_list_items')
+    .select('*', { count: 'exact', head: true })
+    .eq('added_by', pharmacyId);
+
+  if (countError) {
+    throw new AppError(`Failed to count product list items: ${countError.message}`, 400);
+  }
+
+  const deletedCount = count || 0;
+
+  // Delete all items for this pharmacy
+  const { error } = await db
+    .from('product_list_items')
+    .delete()
+    .eq('added_by', pharmacyId);
+
+  if (error) {
+    throw new AppError(`Failed to clear product list items: ${error.message}`, 400);
+  }
+
+  return { deletedCount };
+};
+

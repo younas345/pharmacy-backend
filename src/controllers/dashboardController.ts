@@ -3,13 +3,9 @@ import { getDashboardSummary } from '../services/dashboardService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
 
-const getPharmacyId = (req: Request): string => {
-  return (req.body.pharmacy_id || req.query.pharmacy_id) as string;
-};
-
 export const getDashboardSummaryHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const pharmacyId = getPharmacyId(req);
+    const pharmacyId = req.pharmacyId;
     if (!pharmacyId) {
       throw new AppError('Pharmacy ID is required', 400);
     }

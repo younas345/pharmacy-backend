@@ -3,6 +3,7 @@ import {
   getProductListItemsHandler,
   addProductListItemHandler,
   removeItemHandler,
+  clearAllProductListItemsHandler,
 } from '../controllers/productListsController';
 import { authenticate } from '../middleware/auth';
 
@@ -114,6 +115,51 @@ router.post('/items', addProductListItemHandler);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.delete('/items/:id', removeItemHandler);
+
+/**
+ * @swagger
+ * /api/product-lists/items:
+ *   delete:
+ *     summary: Clear all product list items for authenticated pharmacy
+ *     description: Deletes all product list items for the authenticated pharmacy. Pharmacy ID is automatically determined from authentication token.
+ *     tags: [Product Lists]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: All product list items cleared successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: All product list items cleared successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deletedCount:
+ *                       type: number
+ *                       example: 15
+ *                       description: Number of items deleted
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.delete('/items', clearAllProductListItemsHandler);
 
 export default router;
 
