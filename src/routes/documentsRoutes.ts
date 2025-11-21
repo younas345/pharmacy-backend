@@ -3,24 +3,26 @@ import {
   getDocumentsHandler,
   getDocumentByIdHandler,
   deleteDocumentHandler,
+  viewDocumentHandler,
+  downloadDocumentHandler,
 } from '../controllers/documentsController';
+import { authenticate } from '../middleware/auth';
 
 const router = express.Router();
+
+// Apply authentication middleware to all routes
+router.use(authenticate);
 
 /**
  * @swagger
  * /api/documents:
  *   get:
- *     summary: Get all uploaded documents
+ *     summary: Get all uploaded documents for authenticated pharmacy
+ *     description: Returns list of uploaded documents. Pharmacy ID is automatically determined from authentication token.
  *     tags: [Documents]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
- *       - in: query
- *         name: pharmacy_id
- *         schema:
- *           type: string
- *           format: uuid
- *         required: true
- *         description: Pharmacy ID
  *       - in: query
  *         name: status
  *         schema:
@@ -51,6 +53,12 @@ const router = express.Router();
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/DocumentsListResponse'
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       400:
  *         description: Bad request
  *         content:
@@ -62,18 +70,106 @@ router.get('/', getDocumentsHandler);
 
 /**
  * @swagger
- * /api/documents/{id}:
+ * /api/documents/{id}/view:
  *   get:
- *     summary: Get document by ID
+ *     summary: View document (opens in browser)
+ *     description: Returns the PDF file to be viewed in the browser. Pharmacy ID is automatically determined from authentication token.
  *     tags: [Documents]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
- *       - in: query
- *         name: pharmacy_id
+ *       - in: path
+ *         name: id
+ *         required: true
  *         schema:
  *           type: string
  *           format: uuid
+ *         description: Document ID
+ *     responses:
+ *       200:
+ *         description: PDF file content
+ *         content:
+ *           application/pdf:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: Document not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get('/:id/view', viewDocumentHandler);
+
+/**
+ * @swagger
+ * /api/documents/{id}/download:
+ *   get:
+ *     summary: Download document
+ *     description: Downloads the PDF file. Pharmacy ID is automatically determined from authentication token.
+ *     tags: [Documents]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
  *         required: true
- *         description: Pharmacy ID
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Document ID
+ *     responses:
+ *       200:
+ *         description: PDF file download
+ *         content:
+ *           application/pdf:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: Document not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get('/:id/download', downloadDocumentHandler);
+
+/**
+ * @swagger
+ * /api/documents/{id}:
+ *   get:
+ *     summary: Get document by ID
+ *     description: Returns document metadata. Pharmacy ID is automatically determined from authentication token.
+ *     tags: [Documents]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
  *       - in: path
  *         name: id
  *         required: true
@@ -94,6 +190,12 @@ router.get('/', getDocumentsHandler);
  *                   example: success
  *                 data:
  *                   $ref: '#/components/schemas/UploadedDocument'
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       404:
  *         description: Document not found
  *         content:
@@ -108,15 +210,11 @@ router.get('/:id', getDocumentByIdHandler);
  * /api/documents/{id}:
  *   delete:
  *     summary: Delete document
+ *     description: Deletes a document. Pharmacy ID is automatically determined from authentication token.
  *     tags: [Documents]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
- *       - in: query
- *         name: pharmacy_id
- *         schema:
- *           type: string
- *           format: uuid
- *         required: true
- *         description: Pharmacy ID
  *       - in: path
  *         name: id
  *         required: true
@@ -127,6 +225,12 @@ router.get('/:id', getDocumentByIdHandler);
  *     responses:
  *       204:
  *         description: Document deleted successfully
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       400:
  *         description: Bad request
  *         content:

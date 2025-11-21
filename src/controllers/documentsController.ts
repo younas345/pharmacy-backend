@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { getDocuments, getDocumentById, deleteDocument } from '../services/documentsService';
+import { getDocuments, getDocumentById, deleteDocument, downloadFileFromStorage } from '../services/documentsService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
 
@@ -9,7 +9,7 @@ const getPharmacyId = (req: Request): string => {
 
 export const getDocumentsHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const pharmacyId = getPharmacyId(req);
+    const pharmacyId = req.pharmacyId || getPharmacyId(req);
     if (!pharmacyId) {
       throw new AppError('Pharmacy ID is required', 400);
     }
@@ -36,7 +36,7 @@ export const getDocumentsHandler = catchAsync(
 
 export const getDocumentByIdHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const pharmacyId = getPharmacyId(req);
+    const pharmacyId = req.pharmacyId || getPharmacyId(req);
     if (!pharmacyId) {
       throw new AppError('Pharmacy ID is required', 400);
     }
@@ -53,7 +53,7 @@ export const getDocumentByIdHandler = catchAsync(
 
 export const deleteDocumentHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const pharmacyId = getPharmacyId(req);
+    const pharmacyId = req.pharmacyId || getPharmacyId(req);
     if (!pharmacyId) {
       throw new AppError('Pharmacy ID is required', 400);
     }
@@ -65,6 +65,46 @@ export const deleteDocumentHandler = catchAsync(
       status: 'success',
       data: null,
     });
+  }
+);
+
+// View document (opens in browser)
+export const viewDocumentHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId || getPharmacyId(req);
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
+    const { id } = req.params;
+    const fileData = await downloadFileFromStorage(pharmacyId, id);
+
+    // Set headers for viewing in browser
+    res.setHeader('Content-Type', fileData.contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${fileData.fileName}"`);
+    res.setHeader('Content-Length', fileData.buffer.length);
+
+    res.status(200).send(fileData.buffer);
+  }
+);
+
+// Download document (forces download)
+export const downloadDocumentHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId || getPharmacyId(req);
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
+    const { id } = req.params;
+    const fileData = await downloadFileFromStorage(pharmacyId, id);
+
+    // Set headers for download
+    res.setHeader('Content-Type', fileData.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileData.fileName}"`);
+    res.setHeader('Content-Length', fileData.buffer.length);
+
+    res.status(200).send(fileData.buffer);
   }
 );
 
