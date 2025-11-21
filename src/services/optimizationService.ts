@@ -447,11 +447,51 @@ export const getOptimizationRecommendations = async (
   }
 
   // Calculate earnings comparison
-  // Single Distributor Strategy: Using only the best recommended distributor for all products
-  let singleDistributorStrategy = 0;
+  // Single Distributor Strategy: Pick ONE distributor and use it for ALL products
+  // Find which single distributor gives the best total earnings across all products
+  const allDistributorNames = new Set<string>();
   recommendations.forEach((rec) => {
-    singleDistributorStrategy += rec.expectedPrice * rec.quantity;
+    allDistributorNames.add(rec.recommendedDistributor);
+    rec.alternativeDistributors.forEach((alt) => {
+      allDistributorNames.add(alt.name);
+    });
   });
+
+  // Calculate total earnings for each distributor if used for ALL products
+  const distributorTotalEarnings: Record<string, number> = {};
+  
+  for (const distributorName of allDistributorNames) {
+    const stillAvailable = distributorNameToStillAvailableMap[distributorName] ?? false;
+    if (!stillAvailable) continue; // Skip distributors not available this month
+    
+    let totalEarnings = 0;
+    
+    recommendations.forEach((rec) => {
+      // Find price for this distributor for this product
+      let price: number | null = null;
+      
+      if (rec.recommendedDistributor === distributorName) {
+        price = rec.expectedPrice;
+      } else {
+        const altDist = rec.alternativeDistributors.find(alt => alt.name === distributorName);
+        if (altDist) {
+          price = altDist.price;
+        }
+      }
+      
+      // If distributor has this product, use their price; otherwise use worst price (conservative estimate)
+      const finalPrice = price !== null ? price : rec.worstPrice;
+      totalEarnings += finalPrice * rec.quantity;
+    });
+    
+    distributorTotalEarnings[distributorName] = totalEarnings;
+  }
+
+  // Find the best single distributor (highest total earnings)
+  const bestSingleDistributor = Object.entries(distributorTotalEarnings)
+    .sort((a, b) => b[1] - a[1])[0];
+  
+  const singleDistributorStrategy = bestSingleDistributor ? bestSingleDistributor[1] : 0;
 
   // Multiple Distributors Strategy: Using the best distributor that's still available this month for each product
   // This allows using different distributors for different products to maximize earnings
