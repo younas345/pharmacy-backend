@@ -14,6 +14,7 @@ import barcodeRoutes from './routes/barcodeRoutes';
 import optimizationRoutes from './routes/optimizationRoutes';
 import distributorsRoutes from './routes/distributorsRoutes';
 import subscriptionRoutes from './routes/subscriptionRoutes';
+import settingsRoutes from './routes/settingsRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
@@ -96,6 +97,7 @@ app.use('/api/barcode', barcodeRoutes);
 app.use('/api/optimization', optimizationRoutes);
 app.use('/api/distributors', distributorsRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/settings', settingsRoutes);
 
 /**
  * @swagger
