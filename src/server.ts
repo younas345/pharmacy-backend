@@ -13,6 +13,7 @@ import documentsRoutes from './routes/documentsRoutes';
 import barcodeRoutes from './routes/barcodeRoutes';
 import optimizationRoutes from './routes/optimizationRoutes';
 import distributorsRoutes from './routes/distributorsRoutes';
+import subscriptionRoutes from './routes/subscriptionRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
@@ -70,12 +71,16 @@ app.use(cors({
   maxAge: 86400, // 24 hours
 }));
 
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
 // Swagger Documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// Webhook route (must be before JSON middleware to get raw body)
+import { handleWebhook } from './controllers/webhookController';
+app.post('/api/subscriptions/webhook', express.raw({ type: 'application/json' }), handleWebhook);
+
+// Middleware (after webhook route)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -90,6 +95,7 @@ app.use('/api/documents', documentsRoutes);
 app.use('/api/barcode', barcodeRoutes);
 app.use('/api/optimization', optimizationRoutes);
 app.use('/api/distributors', distributorsRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
 
 /**
  * @swagger
