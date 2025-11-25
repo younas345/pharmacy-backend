@@ -12,10 +12,17 @@ router.use(authenticate);
  * /api/optimization/recommendations:
  *   get:
  *     summary: Get optimization recommendations for pharmacy products
- *     description: Analyzes product list items and matches them with return reports to find the best distributor prices and generate optimization recommendations
+ *     description: Analyzes product list items and matches them with return reports to find the best distributor prices and generate optimization recommendations. If ndc query parameter is provided, searches for those specific NDCs instead of pharmacy's product list.
  *     tags: [Optimization]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: ndc
+ *         schema:
+ *           type: string
+ *         description: Comma-separated NDC codes to search for. If provided, uses these NDCs instead of pharmacy's product list.
+ *         example: "42385097801,69315028209"
  *     responses:
  *       200:
  *         description: Optimization recommendations retrieved successfully
