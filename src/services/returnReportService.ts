@@ -527,8 +527,61 @@ export const saveReturnReport = async (
     throw new AppError('No items to save in return report', 400);
   }
 
-  // Create one record per item
-  const recordsToInsert = items.map((item: any) => ({
+  // Validate NDC codes before inserting
+  const validatedItems: any[] = [];
+  const invalidItems: any[] = [];
+
+  for (const item of items) {
+    const ndcCode = item.ndcCode;
+    
+    if (!ndcCode) {
+      invalidItems.push({ ...item, reason: 'Missing NDC code' });
+      console.log(`❌ Invalid NDC: MISSING - Item: ${item.itemName || 'Unknown'}`);
+      continue;
+    }
+
+    // Check if NDC exists in ndc_products or ndc_packages
+    const [productCheck, packageCheck] = await Promise.all([
+      db.from('ndc_products')
+        .select('product_ndc')
+        .eq('product_ndc', ndcCode)
+        .limit(1)
+        .maybeSingle(),
+      db.from('ndc_packages')
+        .select('ndc_package_code')
+        .eq('ndc_package_code', ndcCode)
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    // If found in either table, it's valid
+    const foundInProducts = productCheck.data !== null;
+    const foundInPackages = packageCheck.data !== null;
+    
+    if (foundInProducts || foundInPackages) {
+      validatedItems.push(item);
+    } else {
+      invalidItems.push({ ...item, reason: 'NDC code not found in database' });
+      console.log(`❌ Invalid NDC: "${ndcCode}" - Item: ${item.itemName || 'Unknown'} - Not found in ndc_products or ndc_packages`);
+    }
+  }
+
+  // Log validation results
+  if (invalidItems.length > 0) {
+    console.log(`\n⚠️  ${invalidItems.length} items skipped due to invalid/missing NDC codes`);
+    console.log(`📋 Invalid NDC Codes List:`);
+    invalidItems.forEach((item, index) => {
+      console.log(`   ${index + 1}. NDC: "${item.ndcCode || 'MISSING'}" - ${item.itemName || 'Unknown'} - Reason: ${item.reason}`);
+    });
+  }
+  console.log(`\n✅ ${validatedItems.length} items with valid NDC codes will be inserted`);
+
+  if (validatedItems.length === 0) {
+    throw new AppError('No items with valid NDC codes to save', 400);
+  }
+
+  // Create one record per validated item
+  const recordsToInsert = validatedItems.map((item: any) => ({
     document_id: input.document_id,
     pharmacy_id: input.pharmacy_id,
     data: item, // Store each item object as JSONB

@@ -11,7 +11,13 @@ export const getOptimizationRecommendationsHandler = catchAsync(
       throw new AppError('Pharmacy ID is required', 400);
     }
 
-    const recommendations = await getOptimizationRecommendations(pharmacyId);
+    // Get NDC search parameter (can be single or comma-separated)
+    const ndcParam = req.query.ndc as string | undefined;
+    const ndcs = ndcParam 
+      ? ndcParam.split(',').map(n => n.trim()).filter(n => n.length > 0)
+      : undefined;
+
+    const recommendations = await getOptimizationRecommendations(pharmacyId, ndcs);
 
     res.status(200).json({
       status: 'success',
