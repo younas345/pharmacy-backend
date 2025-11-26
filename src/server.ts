@@ -19,7 +19,11 @@ import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
 
-dotenv.config({ path: '.env.local' });
+// Load environment variables
+// Vercel provides env vars directly, so only load .env.local in development
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  dotenv.config({ path: '.env.local' });
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -130,8 +134,14 @@ app.get('/health', (req, res) => {
 // Global error handler (must be last)
 app.use(globalErrorHandler);
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Swagger documentation available at http://localhost:${PORT}/api-docs`);
-});
+// Export app for Vercel serverless functions
+export default app;
+
+// Only start server if not running on Vercel
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`Swagger documentation available at http://localhost:${PORT}/api-docs`);
+  });
+}
 
