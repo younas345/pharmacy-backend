@@ -26,6 +26,7 @@ JWT_SECRET=your_jwt_secret
 JWT_EXPIRES_IN=7d
 PORT=3000
 NODE_ENV=development
+ENABLE_NDC_VALIDATION=true  # Set to 'false' or '0' to skip NDC validation in /api/return-reports/process
 ```
 
 3. Create the pharmacy table:
