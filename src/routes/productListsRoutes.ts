@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   getProductListItemsHandler,
   addProductListItemHandler,
+  updateProductListItemHandler,
   removeItemHandler,
   clearAllProductListItemsHandler,
 } from '../controllers/productListsController';
@@ -77,6 +78,62 @@ router.get('/items', getProductListItemsHandler);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/items', addProductListItemHandler);
+
+/**
+ * @swagger
+ * /api/product-lists/items/{id}:
+ *   put:
+ *     summary: Update product list item
+ *     tags: [Product Lists]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Item ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateProductListItemRequest'
+ *     responses:
+ *       200:
+ *         description: Item updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ProductListItemResponse'
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Forbidden - item does not belong to authenticated pharmacy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: Item not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.put('/items/:id', updateProductListItemHandler);
 
 /**
  * @swagger

@@ -82,6 +82,40 @@ export const productListsSchemas = {
       },
     },
   },
+  UpdateProductListItemRequest: {
+    type: 'object',
+    description: 'At least one field must be provided for update',
+    properties: {
+      ndc: {
+        type: 'string',
+        example: '23433-3232-34',
+      },
+      product_name: {
+        type: 'string',
+        example: 'Product 23433-3232-34',
+      },
+      quantity: {
+        type: 'number',
+        example: 13,
+      },
+      lot_number: {
+        type: 'string',
+        nullable: true,
+        example: 'lot-4344-55',
+      },
+      expiration_date: {
+        type: 'string',
+        format: 'date',
+        nullable: true,
+        example: '2025-11-21',
+      },
+      notes: {
+        type: 'string',
+        nullable: true,
+        example: 'hello',
+      },
+    },
+  },
   ProductListItemResponse: {
     type: 'object',
     properties: {

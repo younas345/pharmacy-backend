@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import {
   getProductListItems,
   addProductListItem,
+  updateProductListItem,
   removeItemFromProductList,
   clearAllProductListItems,
 } from '../services/productListsService';
@@ -49,6 +50,38 @@ export const addProductListItemHandler = catchAsync(
     });
 
     res.status(201).json({
+      status: 'success',
+      data: item,
+    });
+  }
+);
+
+// Update product list item
+export const updateProductListItemHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId;
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
+    const { id } = req.params;
+    const { ndc, product_name, quantity, lot_number, expiration_date, notes } = req.body;
+
+    // At least one field must be provided for update
+    if (!ndc && !product_name && quantity === undefined && !lot_number && !expiration_date && !notes) {
+      throw new AppError('At least one field must be provided for update', 400);
+    }
+
+    const item = await updateProductListItem(id, pharmacyId, {
+      ndc,
+      product_name,
+      quantity,
+      lot_number,
+      expiration_date,
+      notes,
+    });
+
+    res.status(200).json({
       status: 'success',
       data: item,
     });
