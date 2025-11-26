@@ -434,18 +434,11 @@ export const getTopDistributors = async (pharmacyId: string): Promise<TopDistrib
     };
   });
 
-  // Sort by: document count (desc), total credit amount (desc), then by name (asc)
+  // Sort by: total credit amount (desc) - highest credit amount first
   topDistributors.sort((a, b) => {
-    // First by document count
-    if (b.documentCount! !== a.documentCount!) {
-      return b.documentCount! - a.documentCount!;
-    }
-    // Then by total credit amount
-    if (b.totalCreditAmount! !== a.totalCreditAmount!) {
-      return b.totalCreditAmount! - a.totalCreditAmount!;
-    }
-    // Finally by name
-    return a.name.localeCompare(b.name);
+    const amountA = a.totalCreditAmount || 0;
+    const amountB = b.totalCreditAmount || 0;
+    return amountB - amountA; // Descending order (highest first)
   });
 
   return topDistributors;
