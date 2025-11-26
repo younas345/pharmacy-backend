@@ -6,6 +6,11 @@ export interface OptimizationRecommendation {
   productName: string;
   quantity: number;
   recommendedDistributor: string;
+  recommendedDistributorContact?: {
+    email?: string;
+    phone?: string;
+    location?: string;
+  };
   expectedPrice: number;
   worstPrice: number;
   available?: boolean;
@@ -14,6 +19,9 @@ export interface OptimizationRecommendation {
     price: number;
     difference: number;
     available?: boolean;
+    email?: string;
+    phone?: string;
+    location?: string;
   }>;
   savings: number;
   _distributorAverages?: Array<{ name: string; price: number }>; // Temporary storage for availability check
@@ -430,17 +438,66 @@ export const getOptimizationRecommendations = async (
     });
   });
 
-  // Fetch distributor IDs from reverse_distributors table
+  // Fetch distributor IDs and contact info from reverse_distributors table
   const distributorNameToIdMap: Record<string, string> = {};
+  const distributorContactInfoMap: Record<string, {
+    email?: string;
+    phone?: string;
+    location?: string;
+  }> = {};
+  
   if (distributorNames.size > 0) {
     const { data: distributors, error: distError } = await db
       .from('reverse_distributors')
-      .select('id, name')
+      .select('id, name, contact_email, contact_phone, address')
       .in('name', Array.from(distributorNames));
 
     if (!distError && distributors) {
       distributors.forEach((dist) => {
         distributorNameToIdMap[dist.name] = dist.id;
+        
+        // Format location from address - combine all components into one string
+        let location: string | undefined;
+        if (dist.address) {
+          const addr = dist.address;
+          const locationParts: string[] = [];
+          
+          // Add street if available
+          if (addr.street) {
+            locationParts.push(addr.street);
+          }
+          
+          // Add city if available
+          if (addr.city) {
+            locationParts.push(addr.city);
+          }
+          
+          // Add state if available
+          if (addr.state) {
+            locationParts.push(addr.state);
+          }
+          
+          // Add zipCode if available
+          if (addr.zipCode) {
+            locationParts.push(addr.zipCode);
+          }
+          
+          // Add country if available
+          if (addr.country) {
+            locationParts.push(addr.country);
+          }
+          
+          // Combine all parts with comma and space
+          if (locationParts.length > 0) {
+            location = locationParts.join(', ');
+          }
+        }
+        
+        distributorContactInfoMap[dist.name] = {
+          email: dist.contact_email || undefined,
+          phone: dist.contact_phone || undefined,
+          location,
+        };
       });
     }
   }
@@ -497,7 +554,15 @@ export const getOptimizationRecommendations = async (
 
     // Find the highest price distributor that IS available
     let recommended: { name: string; price: number } | null = null;
-    const alternatives: Array<{ name: string; price: number; difference: number; available: boolean }> = [];
+    const alternatives: Array<{ 
+      name: string; 
+      price: number; 
+      difference: number; 
+      available: boolean;
+      email?: string;
+      phone?: string;
+      location?: string;
+    }> = [];
 
     // First, find the highest available distributor
     for (const dist of rec._distributorAverages) {
@@ -519,18 +584,28 @@ export const getOptimizationRecommendations = async (
     if (recommended) {
       rec._distributorAverages.forEach((dist) => {
         if (dist.name !== recommended!.name) {
+          const contactInfo = distributorContactInfoMap[dist.name] || {};
           alternatives.push({
             name: dist.name,
             price: dist.price,
             difference: dist.price - recommended!.price, // Negative means lower price (worse)
             available: distributorAvailabilityMap[dist.name] ?? false,
+            email: contactInfo.email,
+            phone: contactInfo.phone,
+            location: contactInfo.location,
           });
         }
       });
     }
 
     if (recommended) {
+      const recommendedContactInfo = distributorContactInfoMap[recommended.name] || {};
       rec.recommendedDistributor = recommended.name;
+      rec.recommendedDistributorContact = {
+        email: recommendedContactInfo.email,
+        phone: recommendedContactInfo.phone,
+        location: recommendedContactInfo.location,
+      };
       rec.expectedPrice = recommended.price;
       rec.available = distributorAvailabilityMap[recommended.name] ?? false;
       rec.alternativeDistributors = alternatives;
