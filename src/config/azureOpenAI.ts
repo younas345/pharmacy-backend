@@ -1,7 +1,11 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 
-dotenv.config({ path: '.env.local' });
+// Load environment variables
+// Vercel provides env vars directly, so only load .env.local in development
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  dotenv.config({ path: '.env.local' });
+}
 
 const apiKey = process.env.AZURE_OPENAI_API_KEY;
 const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
