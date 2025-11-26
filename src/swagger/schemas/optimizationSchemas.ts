@@ -20,6 +20,24 @@ export const optimizationSchemas = {
         example: true,
         description: 'Whether this distributor has recent data (within last 30 days)',
       },
+      email: {
+        type: 'string',
+        example: 'support@abcreverse.com',
+        nullable: true,
+        description: 'Contact email for this distributor',
+      },
+      phone: {
+        type: 'string',
+        example: '(555) 123-4567',
+        nullable: true,
+        description: 'Contact phone for this distributor',
+      },
+      location: {
+        type: 'string',
+        example: '123 Main St, Springfield, IL, 62701, USA',
+        nullable: true,
+        description: 'Location/address of this distributor',
+      },
     },
   },
   OptimizationRecommendation: {
@@ -41,6 +59,31 @@ export const optimizationSchemas = {
       recommendedDistributor: {
         type: 'string',
         example: 'XYZ Pharmaceutical Returns',
+      },
+      recommendedDistributorContact: {
+        type: 'object',
+        properties: {
+          email: {
+            type: 'string',
+            example: 'support@xyzpharma.com',
+            nullable: true,
+            description: 'Contact email for the recommended distributor',
+          },
+          phone: {
+            type: 'string',
+            example: '(555) 987-6543',
+            nullable: true,
+            description: 'Contact phone for the recommended distributor',
+          },
+          location: {
+            type: 'string',
+            example: '456 Oak Ave, Chicago, IL, 60601, USA',
+            nullable: true,
+            description: 'Location/address of the recommended distributor',
+          },
+        },
+        nullable: true,
+        description: 'Contact information for the recommended distributor',
       },
       expectedPrice: {
         type: 'number',
