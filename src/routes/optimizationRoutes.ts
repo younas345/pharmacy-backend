@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getOptimizationRecommendationsHandler } from '../controllers/optimizationController';
+import { getOptimizationRecommendationsHandler, getPackageRecommendationsHandler } from '../controllers/optimizationController';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
@@ -44,6 +44,37 @@ router.use(authenticate);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get('/recommendations', getOptimizationRecommendationsHandler);
+
+/**
+ * @swagger
+ * /api/optimization/packages:
+ *   get:
+ *     summary: Get package recommendations for pharmacy products
+ *     description: Analyzes pharmacy's product list and groups products by distributor based on best prices. Creates optimized packages showing which products should be sent to which distributor for maximum return value.
+ *     tags: [Optimization]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Package recommendations retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PackageRecommendationResponse'
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get('/packages', getPackageRecommendationsHandler);
 
 export default router;
 

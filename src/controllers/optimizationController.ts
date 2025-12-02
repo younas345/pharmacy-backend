@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { getOptimizationRecommendations } from '../services/optimizationService';
+import { getOptimizationRecommendations, getPackageRecommendations } from '../services/optimizationService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
 
@@ -22,6 +22,23 @@ export const getOptimizationRecommendationsHandler = catchAsync(
     res.status(200).json({
       status: 'success',
       data: recommendations,
+    });
+  }
+);
+
+// Get package recommendations
+export const getPackageRecommendationsHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId;
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
+    const packageRecommendations = await getPackageRecommendations(pharmacyId);
+
+    res.status(200).json({
+      status: 'success',
+      data: packageRecommendations,
     });
   }
 );
