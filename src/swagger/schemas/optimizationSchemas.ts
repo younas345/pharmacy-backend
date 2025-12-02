@@ -183,5 +183,161 @@ export const optimizationSchemas = {
       },
     },
   },
+  PackageProduct: {
+    type: 'object',
+    properties: {
+      ndc: {
+        type: 'string',
+        example: '00093-2263-01',
+        description: 'NDC code of the product',
+      },
+      productName: {
+        type: 'string',
+        example: 'Amoxicillin 500mg Capsule',
+        description: 'Name of the product',
+      },
+      quantity: {
+        type: 'number',
+        example: 13,
+        description: 'Quantity of the product',
+      },
+      pricePerUnit: {
+        type: 'number',
+        example: 0.92,
+        description: 'Price per unit from the distributor',
+      },
+      totalValue: {
+        type: 'number',
+        example: 11.96,
+        description: 'Total estimated value (pricePerUnit * quantity)',
+      },
+    },
+  },
+  DistributorPackage: {
+    type: 'object',
+    properties: {
+      distributorName: {
+        type: 'string',
+        example: 'XYZ Pharmaceutical Returns',
+        description: 'Name of the distributor',
+      },
+      distributorId: {
+        type: 'string',
+        example: '123e4567-e89b-12d3-a456-426614174000',
+        nullable: true,
+        description: 'ID of the distributor',
+      },
+      distributorContact: {
+        type: 'object',
+        properties: {
+          email: {
+            type: 'string',
+            example: 'support@xyzpharma.com',
+            nullable: true,
+            description: 'Contact email for the distributor',
+          },
+          phone: {
+            type: 'string',
+            example: '(555) 987-6543',
+            nullable: true,
+            description: 'Contact phone for the distributor',
+          },
+          location: {
+            type: 'string',
+            example: '456 Oak Ave, Chicago, IL, 60601, USA',
+            nullable: true,
+            description: 'Location/address of the distributor',
+          },
+        },
+        nullable: true,
+        description: 'Contact information for the distributor',
+      },
+      products: {
+        type: 'array',
+        items: {
+          $ref: '#/components/schemas/PackageProduct',
+        },
+        description: 'List of products in this package',
+      },
+      totalItems: {
+        type: 'number',
+        example: 45,
+        description: 'Total number of items (sum of all quantities)',
+      },
+      totalEstimatedValue: {
+        type: 'number',
+        example: 125.50,
+        description: 'Total estimated value of all products in this package',
+      },
+      averagePricePerUnit: {
+        type: 'number',
+        example: 2.79,
+        description: 'Average price per unit across all products in this package',
+      },
+    },
+  },
+  PackageRecommendationResponse: {
+    type: 'object',
+    properties: {
+      status: {
+        type: 'string',
+        example: 'success',
+      },
+      data: {
+        type: 'object',
+        properties: {
+          packages: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/DistributorPackage',
+            },
+            description: 'List of packages grouped by distributor',
+          },
+          totalProducts: {
+            type: 'number',
+            example: 20,
+            description: 'Total number of products in the pharmacy list',
+          },
+          totalPackages: {
+            type: 'number',
+            example: 3,
+            description: 'Total number of packages (distributors)',
+          },
+          totalEstimatedValue: {
+            type: 'number',
+            example: 350.75,
+            description: 'Total estimated value across all packages',
+          },
+          generatedAt: {
+            type: 'string',
+            format: 'date-time',
+            example: '2024-02-15T10:00:00Z',
+            description: 'Timestamp when recommendations were generated',
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              productsWithPricing: {
+                type: 'number',
+                example: 18,
+                description: 'Number of products with pricing data available',
+              },
+              productsWithoutPricing: {
+                type: 'number',
+                example: 2,
+                description: 'Number of products without pricing data',
+              },
+              distributorsUsed: {
+                type: 'number',
+                example: 3,
+                description: 'Number of distributors used in the packages',
+              },
+            },
+            description: 'Summary statistics',
+          },
+        },
+      },
+    },
+  },
 };
 
