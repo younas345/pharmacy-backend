@@ -142,6 +142,15 @@ export const getOptimizationRecommendations = async (
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
   }
 
+  // Pre-create normalized NDC lookup for faster matching in non-search mode
+  const normalizedNdcLookup = new Map<string, string>();
+  if (!isSearchMode) {
+    ndcs.forEach(ndc => {
+      const normalized = String(ndc).replace(/-/g, '').trim();
+      normalizedNdcLookup.set(normalized, ndc);
+    });
+  }
+
   console.log(`📦 Found ${returnReports?.length || 0} return report records`);
   console.log(`🔍 Looking for NDCs:`, ndcs);
   
@@ -250,13 +259,15 @@ export const getOptimizationRecommendations = async (
           ndcPricingMap[actualNdcKey] = [];
         }
       } else {
-        // Exact match mode: original logic
-        matchingNdc = ndcs.find(n => {
-          const normalizedProductNdc = String(n).replace(/-/g, '').trim();
-          return normalizedProductNdc === normalizedNdcCode || 
-                 String(n).trim() === String(ndcCode).trim() ||
-                 normalizedProductNdc === String(ndcCode).replace(/-/g, '').trim();
-        });
+        // Exact match mode: use pre-computed lookup map for O(1) access
+        matchingNdc = normalizedNdcLookup.get(normalizedNdcCode);
+        
+        if (!matchingNdc) {
+          // Fallback to original matching logic for edge cases
+          matchingNdc = ndcs.find(n => {
+            return String(n).trim() === String(ndcCode).trim();
+          });
+        }
         
         if (!matchingNdc) {
           return;
@@ -628,48 +639,51 @@ export const getOptimizationRecommendations = async (
   const totalPotentialSavings = recommendations.reduce((sum, rec) => sum + rec.savings, 0);
 
   // Calculate distributor usage statistics
-  // Get total active distributors
-  const { data: allActiveDistributors, error: allDistError } = await db
-    .from('reverse_distributors')
-    .select('id')
-    .eq('is_active', true);
-
-  const totalDistributors = allActiveDistributors?.length || 0;
-
-  // Get distributors used this month (distributors with last document's report_date within last 30 days)
-  // Use the same logic as top distributors: order by report_date DESC and check if latest is within 30 days
+  // Calculate 30 days ago once
   const now = new Date();
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(now.getDate() - 30);
   const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
 
-  // Get all active distributors and check their last document's report_date
-  const uniqueUsedDistributorIds = new Set<string>();
-  
-  if (allActiveDistributors && allActiveDistributors.length > 0) {
-    for (const dist of allActiveDistributors) {
-      // Get the most recent document for this pharmacy and distributor (by report_date)
-      const { data: lastDocument, error: docError } = await db
-        .from('uploaded_documents')
-        .select('report_date')
-        .eq('pharmacy_id', pharmacyId)
-        .eq('reverse_distributor_id', dist.id)
-        .not('report_date', 'is', null)
-        .order('report_date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+  // Fetch all data in parallel for better performance
+  const [activeDistributorsResult, documentsResult] = await Promise.all([
+    db.from('reverse_distributors').select('id').eq('is_active', true),
+    db.from('uploaded_documents')
+      .select('reverse_distributor_id, report_date')
+      .eq('pharmacy_id', pharmacyId)
+      .not('report_date', 'is', null)
+      .order('report_date', { ascending: false })
+  ]);
 
-      if (!docError && lastDocument && lastDocument.report_date) {
-        const reportDateStr = new Date(lastDocument.report_date).toISOString().split('T')[0];
-        // If last document's report_date is within last 30 days, mark as used
-        if (reportDateStr >= thirtyDaysAgoStr) {
-          uniqueUsedDistributorIds.add(dist.id);
+  const allActiveDistributors = activeDistributorsResult.data || [];
+  const totalDistributors = allActiveDistributors.length;
+
+  // Build a map of most recent report date per distributor
+  const distributorLastReportMap = new Map<string, string>();
+  if (documentsResult.data) {
+    for (const doc of documentsResult.data) {
+      if (doc.reverse_distributor_id && doc.report_date) {
+        const existing = distributorLastReportMap.get(doc.reverse_distributor_id);
+        // Keep only the most recent date (data is already sorted desc)
+        if (!existing) {
+          distributorLastReportMap.set(doc.reverse_distributor_id, doc.report_date);
         }
       }
     }
   }
 
-  const usedThisMonth = uniqueUsedDistributorIds.size;
+  // Count distributors used this month
+  let usedThisMonth = 0;
+  for (const dist of allActiveDistributors) {
+    const lastReportDate = distributorLastReportMap.get(dist.id);
+    if (lastReportDate) {
+      const reportDateStr = new Date(lastReportDate).toISOString().split('T')[0];
+      if (reportDateStr >= thirtyDaysAgoStr) {
+        usedThisMonth++;
+      }
+    }
+  }
+
   const stillAvailable = Math.max(0, totalDistributors - usedThisMonth);
 
   // COMMENTED OUT: Create a map to check if a distributor (by name) is still available this month
