@@ -19,7 +19,11 @@ import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
 
-dotenv.config({ path: '.env.local' });
+// Load environment variables
+// Vercel provides env vars directly, so only load .env.local in development
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  dotenv.config({ path: '.env.local' });
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,8 +34,15 @@ const allowedOrigins = [
   'http://localhost:3001',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
+  'https://pharmacy-ui-75vl.vercel.app', // Without trailing slash
+  'https://pharmacy-ui-75vl.vercel.app/', // With trailing slash (for safety)
   process.env.FRONTEND_URL,
 ].filter(Boolean) as string[];
+
+// Normalize origin by removing trailing slash for comparison
+const normalizeOrigin = (origin: string): string => {
+  return origin.replace(/\/$/, '');
+};
 
 app.use(cors({
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
@@ -40,24 +51,23 @@ app.use(cors({
       return callback(null, true);
     }
     
-    // In development, allow all localhost origins
-    if (process.env.NODE_ENV !== 'production') {
-      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-        return callback(null, true);
-      }
-    }
+    // Normalize the origin (remove trailing slash)
+    const normalizedOrigin = normalizeOrigin(origin);
     
-    // Check if origin is in allowed list
-    if (allowedOrigins.includes(origin)) {
+    // Always allow localhost origins (for local development)
+    if (normalizedOrigin.includes('localhost') || normalizedOrigin.includes('127.0.0.1')) {
       return callback(null, true);
     }
     
-    // For production, you might want to be more strict
-    if (process.env.NODE_ENV === 'production') {
-      return callback(new Error('Not allowed by CORS'));
+    // Check if normalized origin is in allowed list (also normalize allowed origins for comparison)
+    const normalizedAllowedOrigins = allowedOrigins.map(normalizeOrigin);
+    if (normalizedAllowedOrigins.includes(normalizedOrigin)) {
+      return callback(null, true);
     }
     
-    callback(null, true);
+    // If origin is not in allowed list, block it
+    console.warn(`CORS blocked origin: ${origin} (normalized: ${normalizedOrigin})`);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true, // Allow cookies/auth headers
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
@@ -130,8 +140,14 @@ app.get('/health', (req, res) => {
 // Global error handler (must be last)
 app.use(globalErrorHandler);
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Swagger documentation available at http://localhost:${PORT}/api-docs`);
-});
+// Export app for Vercel serverless functions
+export default app;
+
+// Only start server if not running on Vercel
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`Swagger documentation available at http://localhost:${PORT}/api-docs`);
+  });
+}
 
