@@ -21,7 +21,12 @@ export interface SigninData {
 export interface AuthResponse {
   user: any;
   token: string;
+  refreshToken: string;
   session: any;
+}
+
+export interface RefreshTokenData {
+  refreshToken: string;
 }
 
 export const signup = async (data: SignupData): Promise<AuthResponse> => {
@@ -84,6 +89,7 @@ export const signup = async (data: SignupData): Promise<AuthResponse> => {
   return {
     user: pharmacyData,
     token: sessionData.session.access_token,
+    refreshToken: sessionData.session.refresh_token,
     session: sessionData.session,
   };
 };
@@ -117,7 +123,105 @@ export const signin = async (data: SigninData): Promise<AuthResponse> => {
   return {
     user: pharmacyData,
     token: authData.session.access_token,
+    refreshToken: authData.session.refresh_token,
     session: authData.session,
   };
+};
+
+interface SupabaseTokenResponse {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  expires_at?: number;
+  token_type?: string;
+  user: {
+    id: string;
+    email?: string;
+    [key: string]: any;
+  };
+}
+
+interface SupabaseErrorResponse {
+  error?: string;
+  error_description?: string;
+  [key: string]: any;
+}
+
+export const refreshToken = async (data: RefreshTokenData): Promise<AuthResponse> => {
+  const { refreshToken: refreshTokenValue } = data;
+
+  if (!refreshTokenValue) {
+    throw new AppError('Refresh token is required', 400);
+  }
+
+  // Use Supabase REST API to refresh the token
+  // This is the proper way to refresh tokens server-side
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new AppError('Supabase configuration missing', 500);
+  }
+
+  try {
+    // Call Supabase Auth REST API to exchange refresh token for new session
+    const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': supabaseAnonKey,
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({
+        refresh_token: refreshTokenValue,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = (await response.json().catch(() => ({}))) as SupabaseErrorResponse;
+      throw new AppError(errorData.error_description || errorData.error || 'Invalid or expired refresh token', 401);
+    }
+
+    const sessionData = (await response.json()) as SupabaseTokenResponse;
+
+    if (!sessionData.access_token || !sessionData.user || !sessionData.user.id) {
+      throw new AppError('Invalid refresh token response', 401);
+    }
+
+    const authUserId = sessionData.user.id;
+
+    // Fetch pharmacy profile to ensure user still exists
+    const { data: pharmacyData, error: pharmacyError } = await db
+      .from('pharmacy')
+      .select('*')
+      .eq('id', authUserId)
+      .single();
+
+    if (pharmacyError || !pharmacyData) {
+      throw new AppError('Pharmacy profile not found', 404);
+    }
+
+    // Construct session object in the format expected by the client
+    const session = {
+      access_token: sessionData.access_token,
+      refresh_token: sessionData.refresh_token || refreshTokenValue,
+      expires_in: sessionData.expires_in,
+      expires_at: sessionData.expires_at,
+      token_type: sessionData.token_type || 'bearer',
+      user: sessionData.user,
+    };
+
+    return {
+      user: pharmacyData,
+      token: sessionData.access_token,
+      refreshToken: sessionData.refresh_token || refreshTokenValue,
+      session,
+    };
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    throw new AppError('Failed to refresh token', 401);
+  }
 };
 

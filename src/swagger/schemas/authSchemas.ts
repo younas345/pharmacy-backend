@@ -109,7 +109,12 @@ export const authSchemas = {
           token: {
             type: 'string',
             example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzA1MzI0MDAwfQ...',
-            description: 'Supabase access token (JWT) for authentication. Use this token in Authorization header as "Bearer {token}"',
+            description: 'Supabase access token (JWT) for authentication. Use this token in Authorization header as "Bearer {token}". This token expires after 1 hour.',
+          },
+          refreshToken: {
+            type: 'string',
+            example: 'v1.abc123def456ghi789jkl012mno345pqr678stu901vwx234yz...',
+            description: 'Refresh token to obtain new access tokens when the current access token expires. Use this token with the /api/auth/refresh endpoint. Refresh tokens typically expire after 7 days.',
           },
           session: {
             type: 'object',
