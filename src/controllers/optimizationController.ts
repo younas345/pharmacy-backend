@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { getOptimizationRecommendations, getPackageRecommendations } from '../services/optimizationService';
+import { getOptimizationRecommendations, getPackageRecommendations, getPackageRecommendationsByNdcs, getDistributorSuggestionsByNdc, getDistributorSuggestionsByMultipleNdcs } from '../services/optimizationService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
 
@@ -40,6 +40,93 @@ export const getPackageRecommendationsHandler = catchAsync(
       status: 'success',
       data: packageRecommendations,
     });
+  }
+);
+
+// Get package recommendations by NDC codes
+export const getPackageRecommendationsByNdcsHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    // Get NDC parameter (can be single or comma-separated)
+    const ndcParam = req.query.ndc as string | undefined;
+    
+    if (!ndcParam) {
+      throw new AppError('NDC parameter is required. Provide single NDC or comma-separated NDCs', 400);
+    }
+
+    const ndcs = ndcParam
+      .split(',')
+      .map((n) => n.trim())
+      .filter((n) => n.length > 0);
+
+    if (ndcs.length === 0) {
+      throw new AppError('At least one valid NDC is required', 400);
+    }
+
+    const packageRecommendations = await getPackageRecommendationsByNdcs(ndcs);
+
+    res.status(200).json({
+      status: 'success',
+      data: packageRecommendations,
+    });
+  }
+);
+
+// Get distributor suggestions for NDC and quantity
+export const getDistributorSuggestionsHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId;
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
+    const { ndc, product, quantity, items } = req.body;
+
+    // Check if it's multiple NDCs (items array) or single NDC
+    if (items && Array.isArray(items)) {
+      // Multiple NDCs mode
+      if (items.length === 0) {
+        throw new AppError('Items array cannot be empty', 400);
+      }
+
+      // Validate each item
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (!item.ndc) {
+          throw new AppError(`Item ${i + 1}: NDC is required`, 400);
+        }
+        if (!item.quantity || typeof item.quantity !== 'number' || item.quantity <= 0) {
+          throw new AppError(`Item ${i + 1}: Quantity is required and must be a positive number`, 400);
+        }
+      }
+
+      const suggestions = await getDistributorSuggestionsByMultipleNdcs(pharmacyId, items);
+
+      res.status(200).json({
+        status: 'success',
+        data: suggestions,
+      });
+    } else {
+      // Single NDC mode (backward compatibility)
+      if (!ndc) {
+        throw new AppError('NDC is required in request body (or use items array for multiple NDCs)', 400);
+      }
+
+      if (!quantity || typeof quantity !== 'number' || quantity <= 0) {
+        throw new AppError('Quantity is required and must be a positive number', 400);
+      }
+
+      const suggestions = await getDistributorSuggestionsByNdc(
+        pharmacyId,
+        ndc,
+        quantity,
+        product
+      );
+
+      res.status(200).json({
+        status: 'success',
+        data: suggestions,
+      });
+    }
   }
 );
 
