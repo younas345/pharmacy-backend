@@ -1,5 +1,5 @@
 import express from 'express';
-import { signupHandler, signinHandler } from '../controllers/authController';
+import { signupHandler, signinHandler, refreshTokenHandler } from '../controllers/authController';
 
 const router = express.Router();
 
@@ -96,6 +96,60 @@ router.post('/signup', signupHandler);
  *               message: 'Pharmacy profile not found'
  */
 router.post('/signin', signinHandler);
+
+/**
+ * @swagger
+ * /api/auth/refresh:
+ *   post:
+ *     summary: Refresh access token using refresh token
+ *     description: Uses a refresh token to obtain a new access token and refresh token. This should be called when the access token expires (typically after 1 hour).
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - refreshToken
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *                 example: 'v1.abc123def456...'
+ *                 description: Refresh token obtained from signin or signup response
+ *     responses:
+ *       200:
+ *         description: Token successfully refreshed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       401:
+ *         description: Unauthorized - invalid or expired refresh token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               status: 'fail'
+ *               message: 'Invalid or expired refresh token'
+ *       400:
+ *         description: Bad request - refresh token not provided
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               status: 'fail'
+ *               message: 'Refresh token is required'
+ *       404:
+ *         description: Pharmacy profile not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/refresh', refreshTokenHandler);
 
 export default router;
 

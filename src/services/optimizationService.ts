@@ -264,9 +264,9 @@ export const getOptimizationRecommendations = async (
         
         if (!matchingNdc) {
           // Fallback to original matching logic for edge cases
-          matchingNdc = ndcs.find(n => {
+        matchingNdc = ndcs.find(n => {
             return String(n).trim() === String(ndcCode).trim();
-          });
+        });
         }
         
         if (!matchingNdc) {
@@ -650,9 +650,9 @@ export const getOptimizationRecommendations = async (
     db.from('reverse_distributors').select('id').eq('is_active', true),
     db.from('uploaded_documents')
       .select('reverse_distributor_id, report_date')
-      .eq('pharmacy_id', pharmacyId)
-      .not('report_date', 'is', null)
-      .order('report_date', { ascending: false })
+        .eq('pharmacy_id', pharmacyId)
+        .not('report_date', 'is', null)
+        .order('report_date', { ascending: false })
   ]);
 
   const allActiveDistributors = activeDistributorsResult.data || [];
