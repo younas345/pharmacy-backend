@@ -1171,3 +1171,1077 @@ export const getPackageRecommendations = async (
   };
 };
 
+// Get package recommendations by NDC codes
+export const getPackageRecommendationsByNdcs = async (
+  ndcs: string[]
+): Promise<PackageRecommendationResponse> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  if (!ndcs || ndcs.length === 0) {
+    return {
+      packages: [],
+      totalProducts: 0,
+      totalPackages: 0,
+      totalEstimatedValue: 0,
+      generatedAt: new Date().toISOString(),
+      summary: {
+        productsWithPricing: 0,
+        productsWithoutPricing: 0,
+        distributorsUsed: 0,
+      },
+    };
+  }
+
+  // Step 1: Normalize and deduplicate NDCs
+  const normalizedNdcs = [...new Set(ndcs.map((ndc) => ndc.trim()).filter((ndc) => ndc.length > 0))];
+
+  if (normalizedNdcs.length === 0) {
+    return {
+      packages: [],
+      totalProducts: 0,
+      totalPackages: 0,
+      totalEstimatedValue: 0,
+      generatedAt: new Date().toISOString(),
+      summary: {
+        productsWithPricing: 0,
+        productsWithoutPricing: 0,
+        distributorsUsed: 0,
+      },
+    };
+  }
+
+  // Step 2: Get product information from products table
+  const { data: products, error: productsError } = await db
+    .from('products')
+    .select('ndc, product_name')
+    .in('ndc', normalizedNdcs);
+
+  // Create a map of NDC to product name
+  const ndcToProductNameMap: Record<string, string> = {};
+  if (!productsError && products) {
+    products.forEach((product) => {
+      ndcToProductNameMap[product.ndc] = product.product_name;
+    });
+  }
+
+  // Step 3: Get pricing data from return_reports
+  const { data: returnReports, error: reportsError } = await db
+    .from('return_reports')
+    .select('id, data');
+
+  if (reportsError) {
+    throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
+  }
+
+  // Step 4: Build pricing map (NDC -> Distributor -> Best Price)
+  const ndcPricingMap: Record<
+    string,
+    Array<{
+      distributorName: string;
+      pricePerUnit: number;
+      creditAmount: number;
+      quantity: number;
+    }>
+  > = {};
+
+  // Initialize map for all NDCs
+  normalizedNdcs.forEach((ndc) => {
+    ndcPricingMap[ndc] = [];
+  });
+
+  // Process return reports to extract pricing
+  (returnReports || []).forEach((report: any) => {
+    const data = report.data;
+    const distributorName = data?.reverseDistributor || 'Unknown Distributor';
+
+    if (!distributorName || distributorName === 'Unknown Distributor') {
+      return;
+    }
+
+    let items: any[] = [];
+
+    if (data && typeof data === 'object') {
+      if (Array.isArray(data.items)) {
+        items = data.items;
+      } else if (data.items && typeof data.items === 'object' && !Array.isArray(data.items)) {
+        items = [data.items];
+      } else if (data.ndcCode || data.ndc) {
+        items = [data];
+      }
+    }
+
+    items.forEach((item: any) => {
+      const ndcCode = item.ndcCode || item.ndc;
+
+      if (!ndcCode) {
+        return;
+      }
+
+      // Normalize NDC for comparison
+      const normalizedNdcCode = String(ndcCode).replace(/-/g, '').trim();
+
+      // Find matching NDC from provided list
+      const matchingNdc = normalizedNdcs.find((n) => {
+        const normalizedProductNdc = String(n).replace(/-/g, '').trim();
+        return (
+          normalizedProductNdc === normalizedNdcCode ||
+          String(n).trim() === String(ndcCode).trim() ||
+          normalizedProductNdc === String(ndcCode).replace(/-/g, '').trim()
+        );
+      });
+
+      if (!matchingNdc) {
+        return;
+      }
+
+      const quantity = Number(item.quantity) || 1;
+      const creditAmount = Number(item.creditAmount) || 0;
+      const pricePerUnit =
+        Number(item.pricePerUnit) || (quantity > 0 && creditAmount > 0 ? creditAmount / quantity : 0);
+
+      if (pricePerUnit > 0) {
+        ndcPricingMap[matchingNdc].push({
+          distributorName,
+          pricePerUnit,
+          creditAmount,
+          quantity,
+        });
+      }
+    });
+  });
+
+  // Step 5: For each NDC, find the best distributor (highest price = best return value)
+  const ndcDistributorMap: Record<
+    string,
+    {
+      distributorName: string;
+      pricePerUnit: number;
+    }
+  > = {};
+
+  normalizedNdcs.forEach((ndc) => {
+    const pricingData = ndcPricingMap[ndc] || [];
+
+    if (pricingData.length === 0) {
+      // No pricing data found for this NDC
+      return;
+    }
+
+    // Group by distributor and get average price per unit
+    const distributorPrices: Record<
+      string,
+      { totalPrice: number; count: number }
+    > = {};
+
+    pricingData.forEach((pricing) => {
+      const distName = (pricing.distributorName || 'Unknown Distributor').trim();
+      if (!distributorPrices[distName]) {
+        distributorPrices[distName] = {
+          totalPrice: 0,
+          count: 0,
+        };
+      }
+      distributorPrices[distName].totalPrice += pricing.pricePerUnit;
+      distributorPrices[distName].count += 1;
+    });
+
+    // Calculate average price per distributor
+    const distributorAverages: Array<{ name: string; price: number }> = Object.entries(
+      distributorPrices
+    )
+      .filter(([_, data]) => data.count > 0)
+      .map(([name, data]) => ({
+        name: name.trim(),
+        price: data.totalPrice / data.count, // Average price per unit
+      }));
+
+    if (distributorAverages.length === 0) {
+      return;
+    }
+
+    // Sort by price (highest first = best return value)
+    distributorAverages.sort((a, b) => b.price - a.price);
+
+    // Use the best distributor (highest price)
+    ndcDistributorMap[ndc] = {
+      distributorName: distributorAverages[0].name,
+      pricePerUnit: distributorAverages[0].price,
+    };
+  });
+
+  // Step 6: Group NDCs by distributor (default quantity to 1 for each NDC)
+  const distributorPackagesMap: Record<string, PackageProduct[]> = {};
+
+  normalizedNdcs.forEach((ndc) => {
+    const distributorInfo = ndcDistributorMap[ndc];
+
+    if (!distributorInfo) {
+      // No pricing data for this NDC - skip it
+      return;
+    }
+
+    const quantity = 1; // Default quantity, can be extended to accept quantities per NDC
+    const pricePerUnit = distributorInfo.pricePerUnit;
+    const totalValue = pricePerUnit * quantity;
+    const productName = ndcToProductNameMap[ndc] || `Product ${ndc}`;
+
+    if (!distributorPackagesMap[distributorInfo.distributorName]) {
+      distributorPackagesMap[distributorInfo.distributorName] = [];
+    }
+
+    distributorPackagesMap[distributorInfo.distributorName].push({
+      ndc,
+      productName,
+      quantity,
+      pricePerUnit,
+      totalValue,
+    });
+  });
+
+  // Step 7: Fetch distributor contact information
+  const distributorNames = Object.keys(distributorPackagesMap);
+  const distributorNameToIdMap: Record<string, string> = {};
+  const distributorContactInfoMap: Record<string, {
+    email?: string;
+    phone?: string;
+    location?: string;
+  }> = {};
+
+  if (distributorNames.length > 0) {
+    const { data: distributors, error: distError } = await db
+      .from('reverse_distributors')
+      .select('id, name, contact_email, contact_phone, address')
+      .in('name', distributorNames);
+
+    if (!distError && distributors) {
+      distributors.forEach((dist) => {
+        distributorNameToIdMap[dist.name] = dist.id;
+
+        // Format location from address
+        let location: string | undefined;
+        if (dist.address) {
+          const addr = dist.address;
+          const locationParts: string[] = [];
+
+          if (addr.street) locationParts.push(addr.street);
+          if (addr.city) locationParts.push(addr.city);
+          if (addr.state) locationParts.push(addr.state);
+          if (addr.zipCode) locationParts.push(addr.zipCode);
+          if (addr.country) locationParts.push(addr.country);
+
+          if (locationParts.length > 0) {
+            location = locationParts.join(', ');
+          }
+        }
+
+        distributorContactInfoMap[dist.name] = {
+          email: dist.contact_email || undefined,
+          phone: dist.contact_phone || undefined,
+          location,
+        };
+      });
+    }
+  }
+
+  // Step 8: Build package recommendations
+  const packages: DistributorPackage[] = Object.entries(distributorPackagesMap).map(
+    ([distributorName, products]) => {
+      const totalItems = products.reduce((sum, p) => sum + p.quantity, 0);
+      const totalEstimatedValue = products.reduce((sum, p) => sum + p.totalValue, 0);
+      const averagePricePerUnit = totalItems > 0 ? totalEstimatedValue / totalItems : 0;
+
+      return {
+        distributorName,
+        distributorId: distributorNameToIdMap[distributorName],
+        distributorContact: distributorContactInfoMap[distributorName],
+        products,
+        totalItems,
+        totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
+        averagePricePerUnit: Math.round(averagePricePerUnit * 100) / 100,
+      };
+    }
+  );
+
+  // Sort packages by total estimated value (highest first)
+  packages.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
+
+  // Calculate summary statistics
+  const productsWithPricing = Object.keys(ndcDistributorMap).length;
+  const productsWithoutPricing = normalizedNdcs.length - productsWithPricing;
+  const totalEstimatedValue = packages.reduce((sum, pkg) => sum + pkg.totalEstimatedValue, 0);
+
+  return {
+    packages,
+    totalProducts: normalizedNdcs.length,
+    totalPackages: packages.length,
+    totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
+    generatedAt: new Date().toISOString(),
+    summary: {
+      productsWithPricing,
+      productsWithoutPricing,
+      distributorsUsed: packages.length,
+    },
+  };
+};
+
+// Interface for distributor suggestion
+export interface DistributorSuggestion {
+  distributorName: string;
+  distributorId?: string;
+  distributorContact?: {
+    email?: string;
+    phone?: string;
+    location?: string;
+  };
+  pricePerUnit: number;
+  totalEstimatedValue: number;
+  averagePricePerUnit: number;
+  available: boolean;
+}
+
+export interface NdcSuggestionResponse {
+  ndc: string;
+  productName: string;
+  requestedQuantity: number;
+  availableQuantity: number;
+  hasEnoughQuantity: boolean;
+  distributors: DistributorSuggestion[];
+  generatedAt: string;
+}
+
+// Get distributor suggestions for a specific NDC and quantity
+export const getDistributorSuggestionsByNdc = async (
+  pharmacyId: string,
+  ndc: string,
+  quantity: number,
+  productName?: string
+): Promise<NdcSuggestionResponse> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  // Normalize NDC
+  const normalizedNdc = ndc.trim();
+  const normalizedNdcForSearch = normalizedNdc.replace(/-/g, '').trim();
+
+  // Step 1: Check if pharmacy has the required quantity in product_list_items
+  const { data: productItems, error: itemsError } = await db
+    .from('product_list_items')
+    .select('ndc, quantity')
+    .eq('added_by', pharmacyId);
+
+  if (itemsError) {
+    throw new AppError(`Failed to fetch product list items: ${itemsError.message}`, 400);
+  }
+
+  // Calculate total available quantity for this NDC
+  let availableQuantity = 0;
+  if (productItems && productItems.length > 0) {
+    productItems.forEach((item) => {
+      const itemNdc = String(item.ndc).trim();
+      const normalizedItemNdc = String(item.ndc).replace(/-/g, '').trim();
+      
+      // Match NDC (with or without dashes)
+      if (
+        itemNdc === normalizedNdc ||
+        normalizedItemNdc === normalizedNdcForSearch ||
+        itemNdc === normalizedNdcForSearch ||
+        normalizedItemNdc === normalizedNdc
+      ) {
+        availableQuantity += item.quantity || 0;
+      }
+    });
+  }
+
+  const hasEnoughQuantity = availableQuantity >= quantity;
+
+  // If pharmacy doesn't have enough quantity, return error immediately
+  if (!hasEnoughQuantity) {
+    // Get product name for error message
+    let finalProductName = productName;
+    if (!finalProductName) {
+      // Try to get from products table
+      const { data: product, error: productError } = await db
+        .from('products')
+        .select('product_name')
+        .eq('ndc', normalizedNdc)
+        .limit(1)
+        .maybeSingle();
+
+      if (!productError && product?.product_name) {
+        finalProductName = product.product_name;
+      } else {
+        // Try to get from product_list_items
+        const { data: productItems, error: itemsError } = await db
+          .from('product_list_items')
+          .select('product_name')
+          .eq('added_by', pharmacyId)
+          .or(`ndc.eq.${normalizedNdc},ndc.eq.${normalizedNdcForSearch}`)
+          .limit(1);
+
+        if (!itemsError && productItems && productItems.length > 0 && productItems[0]?.product_name) {
+          finalProductName = productItems[0].product_name;
+        } else {
+          finalProductName = `Product ${normalizedNdc}`;
+        }
+      }
+    }
+
+    if (availableQuantity === 0) {
+      throw new AppError(
+        `You don't have this product in your inventory. NDC: ${normalizedNdc}, Product: ${finalProductName}`,
+        400
+      );
+    } else {
+      throw new AppError(
+        `You don't have enough quantity for this product. NDC: ${normalizedNdc}, Product: ${finalProductName}, Available: ${availableQuantity}, Requested: ${quantity}`,
+        400
+      );
+    }
+  }
+
+  // Step 2: Get product name if not provided
+  let finalProductName = productName;
+  if (!finalProductName) {
+    // Try to get from products table
+    const { data: product, error: productError } = await db
+      .from('products')
+      .select('product_name')
+      .eq('ndc', normalizedNdc)
+      .limit(1)
+      .maybeSingle();
+
+    if (!productError && product?.product_name) {
+      finalProductName = product.product_name;
+    } else {
+      // Try to get from product_list_items
+      const { data: productItems, error: itemsError } = await db
+        .from('product_list_items')
+        .select('product_name')
+        .eq('added_by', pharmacyId)
+        .or(`ndc.eq.${normalizedNdc},ndc.eq.${normalizedNdcForSearch}`)
+        .limit(1);
+
+      if (!itemsError && productItems && productItems.length > 0 && productItems[0]?.product_name) {
+        finalProductName = productItems[0].product_name;
+      } else {
+        finalProductName = `Product ${normalizedNdc}`;
+      }
+    }
+  }
+
+  // Step 3: Get pricing data from return_reports
+  const { data: returnReports, error: reportsError } = await db
+    .from('return_reports')
+    .select('id, data');
+
+  if (reportsError) {
+    throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
+  }
+
+  // Step 4: Build pricing map for this NDC
+  const distributorPricingMap: Record<
+    string,
+    Array<{
+      pricePerUnit: number;
+      creditAmount: number;
+      quantity: number;
+    }>
+  > = {};
+
+  // Process return reports to extract pricing for this NDC
+  (returnReports || []).forEach((report: any) => {
+    const data = report.data;
+    const distributorName = data?.reverseDistributor || 'Unknown Distributor';
+
+    if (!distributorName || distributorName === 'Unknown Distributor') {
+      return;
+    }
+
+    let items: any[] = [];
+
+    if (data && typeof data === 'object') {
+      if (Array.isArray(data.items)) {
+        items = data.items;
+      } else if (data.items && typeof data.items === 'object' && !Array.isArray(data.items)) {
+        items = [data.items];
+      } else if (data.ndcCode || data.ndc) {
+        items = [data];
+      }
+    }
+
+    items.forEach((item: any) => {
+      const ndcCode = item.ndcCode || item.ndc;
+
+      if (!ndcCode) {
+        return;
+      }
+
+      // Normalize NDC for comparison
+      const normalizedItemNdc = String(ndcCode).replace(/-/g, '').trim();
+      const itemNdc = String(ndcCode).trim();
+
+      // Check if this item matches our NDC
+      const isMatch =
+        itemNdc === normalizedNdc ||
+        normalizedItemNdc === normalizedNdcForSearch ||
+        itemNdc === normalizedNdcForSearch ||
+        normalizedItemNdc === normalizedNdc;
+
+      if (!isMatch) {
+        return;
+      }
+
+      const itemQuantity = Number(item.quantity) || 1;
+      const creditAmount = Number(item.creditAmount) || 0;
+      const pricePerUnit =
+        Number(item.pricePerUnit) || (itemQuantity > 0 && creditAmount > 0 ? creditAmount / itemQuantity : 0);
+
+      if (pricePerUnit > 0) {
+        if (!distributorPricingMap[distributorName]) {
+          distributorPricingMap[distributorName] = [];
+        }
+
+        distributorPricingMap[distributorName].push({
+          pricePerUnit,
+          creditAmount,
+          quantity: itemQuantity,
+        });
+      }
+    });
+  });
+
+  // Step 5: Calculate average price per unit for each distributor
+  const distributorAverages: Array<{
+    name: string;
+    averagePricePerUnit: number;
+    totalPrice: number;
+    count: number;
+  }> = [];
+
+  Object.entries(distributorPricingMap).forEach(([distributorName, pricingData]) => {
+    const totalPrice = pricingData.reduce((sum, p) => sum + p.pricePerUnit, 0);
+    const count = pricingData.length;
+    const averagePricePerUnit = count > 0 ? totalPrice / count : 0;
+
+    if (averagePricePerUnit > 0) {
+      distributorAverages.push({
+        name: distributorName.trim(),
+        averagePricePerUnit,
+        totalPrice,
+        count,
+      });
+    }
+  });
+
+  // Sort by average price (highest first = best return value)
+  distributorAverages.sort((a, b) => b.averagePricePerUnit - a.averagePricePerUnit);
+
+  // Step 6: Fetch distributor contact information
+  const distributorNames = distributorAverages.map((d) => d.name);
+  const distributorNameToIdMap: Record<string, string> = {};
+  const distributorContactInfoMap: Record<string, {
+    email?: string;
+    phone?: string;
+    location?: string;
+  }> = {};
+
+  if (distributorNames.length > 0) {
+    const { data: distributors, error: distError } = await db
+      .from('reverse_distributors')
+      .select('id, name, contact_email, contact_phone, address')
+      .in('name', distributorNames);
+
+    if (!distError && distributors) {
+      distributors.forEach((dist) => {
+        distributorNameToIdMap[dist.name] = dist.id;
+
+        // Format location from address
+        let location: string | undefined;
+        if (dist.address) {
+          const addr = dist.address;
+          const locationParts: string[] = [];
+
+          if (addr.street) locationParts.push(addr.street);
+          if (addr.city) locationParts.push(addr.city);
+          if (addr.state) locationParts.push(addr.state);
+          if (addr.zipCode) locationParts.push(addr.zipCode);
+          if (addr.country) locationParts.push(addr.country);
+
+          if (locationParts.length > 0) {
+            location = locationParts.join(', ');
+          }
+        }
+
+        distributorContactInfoMap[dist.name] = {
+          email: dist.contact_email || undefined,
+          phone: dist.contact_phone || undefined,
+          location,
+        };
+      });
+    }
+  }
+
+  // Step 7: Build distributor suggestions
+  const distributors: DistributorSuggestion[] = distributorAverages.map((dist) => {
+    const totalEstimatedValue = dist.averagePricePerUnit * quantity;
+
+    return {
+      distributorName: dist.name,
+      distributorId: distributorNameToIdMap[dist.name],
+      distributorContact: distributorContactInfoMap[dist.name],
+      pricePerUnit: Math.round(dist.averagePricePerUnit * 100) / 100,
+      totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
+      averagePricePerUnit: Math.round(dist.averagePricePerUnit * 100) / 100,
+      available: true, // Assuming available if found in return reports
+    };
+  });
+
+  return {
+    ndc: normalizedNdc,
+    productName: finalProductName || `Product ${normalizedNdc}`,
+    requestedQuantity: quantity,
+    availableQuantity,
+    hasEnoughQuantity,
+    distributors,
+    generatedAt: new Date().toISOString(),
+  };
+};
+
+// Interface for multiple NDC suggestions request item
+export interface NdcSuggestionRequestItem {
+  ndc: string;
+  product?: string;
+  quantity: number;
+}
+
+// Interface for distributor NDC product info
+export interface DistributorNdcProduct {
+  ndc: string;
+  productName: string;
+  quantity: number;
+  pricePerUnit: number;
+  totalEstimatedValue: number;
+}
+
+// Interface for distributor with their accepted NDCs
+export interface DistributorWithNdcs {
+  distributorName: string;
+  distributorId?: string;
+  distributorContact?: {
+    email?: string;
+    phone?: string;
+    location?: string;
+  };
+  products: DistributorNdcProduct[];
+  totalItems: number;
+  totalEstimatedValue: number;
+  ndcsCount: number;
+}
+
+// Interface for NDC without any distributor
+export interface NdcWithoutDistributor {
+  ndc: string;
+  productName: string;
+  quantity: number;
+  reason: string;
+}
+
+// Interface for multiple NDC suggestions response (grouped by distributor)
+export interface MultipleNdcSuggestionResponse {
+  distributors: DistributorWithNdcs[];
+  ndcsWithoutDistributors: NdcWithoutDistributor[];
+  totalItems: number;
+  totalDistributors: number;
+  totalEstimatedValue: number;
+  generatedAt: string;
+}
+
+// Get distributor suggestions for multiple NDCs and quantities (grouped by distributor)
+export const getDistributorSuggestionsByMultipleNdcs = async (
+  pharmacyId: string,
+  items: NdcSuggestionRequestItem[]
+): Promise<MultipleNdcSuggestionResponse> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  if (!items || items.length === 0) {
+    throw new AppError('At least one item with NDC and quantity is required', 400);
+  }
+
+  const db = supabaseAdmin;
+
+  // Step 1: Validate quantities for all items first
+  const { data: productItems, error: itemsError } = await db
+    .from('product_list_items')
+    .select('ndc, quantity, product_name')
+    .eq('added_by', pharmacyId);
+
+  if (itemsError) {
+    throw new AppError(`Failed to fetch product list items: ${itemsError.message}`, 400);
+  }
+
+  // Validate each item has enough quantity
+  for (const item of items) {
+    const normalizedNdc = item.ndc.trim();
+    const normalizedNdcForSearch = normalizedNdc.replace(/-/g, '').trim();
+    
+    let availableQuantity = 0;
+    if (productItems && productItems.length > 0) {
+      productItems.forEach((pItem) => {
+        const itemNdc = String(pItem.ndc).trim();
+        const normalizedItemNdc = String(pItem.ndc).replace(/-/g, '').trim();
+        
+        if (
+          itemNdc === normalizedNdc ||
+          normalizedItemNdc === normalizedNdcForSearch ||
+          itemNdc === normalizedNdcForSearch ||
+          normalizedItemNdc === normalizedNdc
+        ) {
+          availableQuantity += pItem.quantity || 0;
+        }
+      });
+    }
+
+    if (availableQuantity < item.quantity) {
+      // Get product name for error
+      let productName = item.product || `Product ${normalizedNdc}`;
+      if (!item.product) {
+        const { data: product } = await db
+          .from('products')
+          .select('product_name')
+          .eq('ndc', normalizedNdc)
+          .limit(1)
+          .maybeSingle();
+
+        if (product?.product_name) {
+          productName = product.product_name;
+        } else {
+          const matchingItem = productItems?.find((pItem) => {
+            const itemNdc = String(pItem.ndc).trim();
+            const normalizedItemNdc = String(pItem.ndc).replace(/-/g, '').trim();
+            return (
+              itemNdc === normalizedNdc ||
+              normalizedItemNdc === normalizedNdcForSearch ||
+              itemNdc === normalizedNdcForSearch ||
+              normalizedItemNdc === normalizedNdc
+            );
+          });
+          if (matchingItem?.product_name) {
+            productName = matchingItem.product_name;
+          }
+        }
+      }
+
+      if (availableQuantity === 0) {
+        throw new AppError(
+          `You don't have this product in your inventory. NDC: ${normalizedNdc}, Product: ${productName}`,
+          400
+        );
+      } else {
+        throw new AppError(
+          `You don't have enough quantity for this product. NDC: ${normalizedNdc}, Product: ${productName}, Available: ${availableQuantity}, Requested: ${item.quantity}`,
+          400
+        );
+      }
+    }
+  }
+
+  // Step 2: Get all return reports
+  const { data: returnReports, error: reportsError } = await db
+    .from('return_reports')
+    .select('id, data');
+
+  if (reportsError) {
+    throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
+  }
+
+  // Step 3: Build pricing map for all NDCs (NDC -> Distributor -> Pricing Data)
+  const ndcDistributorPricingMap: Record<
+    string,
+    Record<
+      string,
+      Array<{
+        pricePerUnit: number;
+        creditAmount: number;
+        quantity: number;
+      }>
+    >
+  > = {};
+
+  // Initialize map for all NDCs
+  items.forEach((item) => {
+    const normalizedNdc = item.ndc.trim();
+    ndcDistributorPricingMap[normalizedNdc] = {};
+  });
+
+  // Process return reports to extract pricing for all NDCs
+  (returnReports || []).forEach((report: any) => {
+    const data = report.data;
+    const distributorName = data?.reverseDistributor || 'Unknown Distributor';
+
+    if (!distributorName || distributorName === 'Unknown Distributor') {
+      return;
+    }
+
+    let reportItems: any[] = [];
+
+    if (data && typeof data === 'object') {
+      if (Array.isArray(data.items)) {
+        reportItems = data.items;
+      } else if (data.items && typeof data.items === 'object' && !Array.isArray(data.items)) {
+        reportItems = [data.items];
+      } else if (data.ndcCode || data.ndc) {
+        reportItems = [data];
+      }
+    }
+
+    reportItems.forEach((item: any) => {
+      const ndcCode = item.ndcCode || item.ndc;
+      if (!ndcCode) {
+        return;
+      }
+
+      const normalizedItemNdc = String(ndcCode).replace(/-/g, '').trim();
+      const itemNdc = String(ndcCode).trim();
+
+      // Find matching NDC from requested items
+      let matchingNdc: string | undefined;
+      for (const requestedItem of items) {
+        const normalizedRequestedNdc = requestedItem.ndc.trim();
+        const normalizedRequestedNdcForSearch = normalizedRequestedNdc.replace(/-/g, '').trim();
+
+        if (
+          itemNdc === normalizedRequestedNdc ||
+          normalizedItemNdc === normalizedRequestedNdcForSearch ||
+          itemNdc === normalizedRequestedNdcForSearch ||
+          normalizedItemNdc === normalizedRequestedNdc
+        ) {
+          matchingNdc = normalizedRequestedNdc;
+          break;
+        }
+      }
+
+      if (!matchingNdc) {
+        return;
+      }
+
+      const itemQuantity = Number(item.quantity) || 1;
+      const creditAmount = Number(item.creditAmount) || 0;
+      const pricePerUnit =
+        Number(item.pricePerUnit) || (itemQuantity > 0 && creditAmount > 0 ? creditAmount / itemQuantity : 0);
+
+      if (pricePerUnit > 0) {
+        if (!ndcDistributorPricingMap[matchingNdc][distributorName]) {
+          ndcDistributorPricingMap[matchingNdc][distributorName] = [];
+        }
+
+        ndcDistributorPricingMap[matchingNdc][distributorName].push({
+          pricePerUnit,
+          creditAmount,
+          quantity: itemQuantity,
+        });
+      }
+    });
+  });
+
+  // Step 4: Calculate average price per distributor for each NDC
+  const ndcDistributorAverages: Record<
+    string,
+    Array<{
+      distributorName: string;
+      averagePricePerUnit: number;
+    }>
+  > = {};
+
+  items.forEach((item) => {
+    const normalizedNdc = item.ndc.trim();
+    const distributorPricing = ndcDistributorPricingMap[normalizedNdc] || {};
+    const averages: Array<{ distributorName: string; averagePricePerUnit: number }> = [];
+
+    Object.entries(distributorPricing).forEach(([distributorName, pricingData]) => {
+      const totalPrice = pricingData.reduce((sum, p) => sum + p.pricePerUnit, 0);
+      const count = pricingData.length;
+      const averagePricePerUnit = count > 0 ? totalPrice / count : 0;
+
+      if (averagePricePerUnit > 0) {
+        averages.push({
+          distributorName: distributorName.trim(),
+          averagePricePerUnit,
+        });
+      }
+    });
+
+    // Sort by price (highest first)
+    averages.sort((a, b) => b.averagePricePerUnit - a.averagePricePerUnit);
+    ndcDistributorAverages[normalizedNdc] = averages;
+  });
+
+  // Step 5: Get product names for all NDCs
+  const ndcProductNames: Record<string, string> = {};
+  for (const item of items) {
+    const normalizedNdc = item.ndc.trim();
+    let productName: string = item.product || '';
+
+    if (!productName) {
+      const { data: product } = await db
+        .from('products')
+        .select('product_name')
+        .eq('ndc', normalizedNdc)
+        .limit(1)
+        .maybeSingle();
+
+      if (product?.product_name) {
+        productName = product.product_name;
+      } else {
+        const matchingItem = productItems?.find((pItem) => {
+          const itemNdc = String(pItem.ndc).trim();
+          const normalizedItemNdc = String(pItem.ndc).replace(/-/g, '').trim();
+          const normalizedNdcForSearch = normalizedNdc.replace(/-/g, '').trim();
+          return (
+            itemNdc === normalizedNdc ||
+            normalizedItemNdc === normalizedNdcForSearch ||
+            itemNdc === normalizedNdcForSearch ||
+            normalizedItemNdc === normalizedNdc
+          );
+        });
+        if (matchingItem?.product_name) {
+          productName = matchingItem.product_name;
+        } else {
+          productName = `Product ${normalizedNdc}`;
+        }
+      }
+    }
+
+    ndcProductNames[normalizedNdc] = productName;
+  }
+
+  // Step 6: Group by distributor
+  const distributorMap: Record<string, DistributorWithNdcs> = {};
+  const ndcsWithDistributors = new Set<string>();
+
+  items.forEach((item) => {
+    const normalizedNdc = item.ndc.trim();
+    const distributorAverages = ndcDistributorAverages[normalizedNdc] || [];
+
+    if (distributorAverages.length === 0) {
+      // This NDC has no distributors - will be added to ndcsWithoutDistributors later
+      return;
+    }
+
+    ndcsWithDistributors.add(normalizedNdc);
+
+    // Add this NDC to all distributors that accept it
+    distributorAverages.forEach((dist) => {
+      const distributorName = dist.distributorName;
+
+      if (!distributorMap[distributorName]) {
+        distributorMap[distributorName] = {
+          distributorName,
+          products: [],
+          totalItems: 0,
+          totalEstimatedValue: 0,
+          ndcsCount: 0,
+        };
+      }
+
+      const pricePerUnit = dist.averagePricePerUnit;
+      const totalEstimatedValue = pricePerUnit * item.quantity;
+
+      distributorMap[distributorName].products.push({
+        ndc: normalizedNdc,
+        productName: ndcProductNames[normalizedNdc],
+        quantity: item.quantity,
+        pricePerUnit: Math.round(pricePerUnit * 100) / 100,
+        totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
+      });
+
+      distributorMap[distributorName].totalItems += item.quantity;
+      distributorMap[distributorName].totalEstimatedValue += totalEstimatedValue;
+      distributorMap[distributorName].ndcsCount += 1;
+    });
+  });
+
+  // Step 7: Fetch distributor contact information
+  const distributorNames = Object.keys(distributorMap);
+  if (distributorNames.length > 0) {
+    const { data: distributors, error: distError } = await db
+      .from('reverse_distributors')
+      .select('id, name, contact_email, contact_phone, address')
+      .in('name', distributorNames);
+
+    if (!distError && distributors) {
+      distributors.forEach((dist) => {
+        if (distributorMap[dist.name]) {
+          distributorMap[dist.name].distributorId = dist.id;
+
+          // Format location from address
+          let location: string | undefined;
+          if (dist.address) {
+            const addr = dist.address;
+            const locationParts: string[] = [];
+
+            if (addr.street) locationParts.push(addr.street);
+            if (addr.city) locationParts.push(addr.city);
+            if (addr.state) locationParts.push(addr.state);
+            if (addr.zipCode) locationParts.push(addr.zipCode);
+            if (addr.country) locationParts.push(addr.country);
+
+            if (locationParts.length > 0) {
+              location = locationParts.join(', ');
+            }
+          }
+
+          distributorMap[dist.name].distributorContact = {
+            email: dist.contact_email || undefined,
+            phone: dist.contact_phone || undefined,
+            location,
+          };
+        }
+      });
+    }
+  }
+
+  // Step 8: Build distributors array and calculate totals
+  const distributorsArray: DistributorWithNdcs[] = Object.values(distributorMap).map((dist) => ({
+    ...dist,
+    totalEstimatedValue: Math.round(dist.totalEstimatedValue * 100) / 100,
+  }));
+
+  // Sort by total estimated value (highest first)
+  distributorsArray.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
+
+  // Step 9: Find NDCs without any distributors
+  const ndcsWithoutDistributors: NdcWithoutDistributor[] = [];
+  items.forEach((item) => {
+    const normalizedNdc = item.ndc.trim();
+    if (!ndcsWithDistributors.has(normalizedNdc)) {
+      ndcsWithoutDistributors.push({
+        ndc: normalizedNdc,
+        productName: ndcProductNames[normalizedNdc],
+        quantity: item.quantity,
+        reason: 'No distributor found offering returns for this NDC',
+      });
+    }
+  });
+
+  // Calculate total estimated value
+  const totalEstimatedValue = distributorsArray.reduce((sum, dist) => sum + dist.totalEstimatedValue, 0);
+
+  return {
+    distributors: distributorsArray,
+    ndcsWithoutDistributors,
+    totalItems: items.length,
+    totalDistributors: distributorsArray.length,
+    totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
+    generatedAt: new Date().toISOString(),
+  };
+};
+
