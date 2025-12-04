@@ -4,6 +4,7 @@ import {
   getCustomPackagesHandler,
   getCustomPackageByIdHandler,
   deleteCustomPackageHandler,
+  updatePackageStatusHandler,
 } from '../controllers/customPackagesController';
 
 const router = Router();
@@ -60,10 +61,9 @@ router.post('/', createCustomPackageHandler);
  *       - in: query
  *         name: status
  *         schema:
- *           type: string
- *           enum: [draft, ready_to_ship, in_transit, received, processed, completed, cancelled]
- *         description: Filter by package status
- *         example: draft
+ *           type: boolean
+ *         description: Filter by package status (true = marked/active, false = draft/inactive)
+ *         example: false
  *       - in: query
  *         name: limit
  *         schema:
@@ -186,6 +186,46 @@ router.get('/:id', getCustomPackageByIdHandler);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.delete('/:id', deleteCustomPackageHandler);
+
+/**
+ * @swagger
+ * /api/optimization/custom-packages/{id}/mark-status:
+ *   patch:
+ *     summary: Toggle package status
+ *     description: Toggles the status of a custom package (false to true, true to false).
+ *     tags: [Optimization]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Package ID
+ *         example: "123e4567-e89b-12d3-a456-426614174000"
+ *     responses:
+ *       200:
+ *         description: Package status toggled successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/GetCustomPackageResponse'
+ *       404:
+ *         description: Package not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.patch('/:id/mark-status', updatePackageStatusHandler);
 
 export default router;
 

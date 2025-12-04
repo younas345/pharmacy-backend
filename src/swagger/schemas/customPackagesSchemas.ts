@@ -161,10 +161,9 @@ export const customPackagesSchemas = {
         nullable: true,
       },
       status: {
-        type: 'string',
-        enum: ['draft', 'ready_to_ship', 'in_transit', 'received', 'processed', 'completed', 'cancelled'],
-        example: 'draft',
-        description: 'Status of the package',
+        type: 'boolean',
+        example: false,
+        description: 'Status of the package (false = draft/inactive, true = marked/active)',
       },
       createdAt: {
         type: 'string',
@@ -192,6 +191,32 @@ export const customPackagesSchemas = {
         type: 'number',
         example: 10,
         description: 'Total number of packages',
+      },
+      stats: {
+        type: 'object',
+        description: 'Statistics for packages',
+        properties: {
+          totalProducts: {
+            type: 'number',
+            example: 500,
+            description: 'Total number of products across packages with status false',
+          },
+          totalValue: {
+            type: 'number',
+            example: 12500.50,
+            description: 'Total estimated value across packages with status false',
+          },
+          deliveredPackages: {
+            type: 'number',
+            example: 5,
+            description: 'Count of packages with status true (delivered)',
+          },
+          nonDeliveredPackages: {
+            type: 'number',
+            example: 5,
+            description: 'Count of packages with status false (non-delivered)',
+          },
+        },
       },
     },
   },

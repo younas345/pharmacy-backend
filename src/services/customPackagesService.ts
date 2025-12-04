@@ -37,7 +37,7 @@ export interface CustomPackage {
   totalItems: number;
   totalEstimatedValue: number;
   notes?: string;
-  status: string;
+  status: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -46,6 +46,12 @@ export interface CustomPackage {
 export interface CustomPackagesListResponse {
   packages: CustomPackage[];
   total: number;
+  stats: {
+    totalProducts: number;
+    totalValue: number;
+    deliveredPackages: number;
+    nonDeliveredPackages: number;
+  };
 }
 
 // Generate unique package number
@@ -160,7 +166,7 @@ export const createCustomPackage = async (
       total_items: totalItems,
       total_estimated_value: totalEstimatedValue,
       notes: packageData.notes || null,
-      status: 'draft',
+      status: false,
       created_by: userId,
     })
     .select()
@@ -210,7 +216,7 @@ export const createCustomPackage = async (
 export const getCustomPackages = async (
   pharmacyId: string,
   filters?: {
-    status?: string;
+    status?: boolean;
     limit?: number;
     offset?: number;
   }
@@ -333,9 +339,66 @@ export const getCustomPackages = async (
     updatedAt: pkg.updated_at,
   }));
 
+  // Calculate statistics
+  // IMPORTANT: Stats are calculated from ALL packages (not paginated)
+  // This ensures stats reflect the complete dataset, not just the current page
+  
+  // Get count of packages with status true (delivered) - no pagination applied
+  const { count: deliveredPackagesCount, error: deliveredCountError } = await db
+    .from('custom_packages')
+    .select('*', { count: 'exact', head: true })
+    .eq('pharmacy_id', pharmacyId)
+    .eq('status', true);
+
+  if (deliveredCountError) {
+    throw new AppError(`Failed to fetch delivered packages count: ${deliveredCountError.message}`, 400);
+  }
+
+  // Get count of packages with status false (non-delivered) - no pagination applied
+  const { count: nonDeliveredPackagesCount, error: nonDeliveredCountError } = await db
+    .from('custom_packages')
+    .select('*', { count: 'exact', head: true })
+    .eq('pharmacy_id', pharmacyId)
+    .eq('status', false);
+
+  if (nonDeliveredCountError) {
+    throw new AppError(`Failed to fetch non-delivered packages count: ${nonDeliveredCountError.message}`, 400);
+  }
+
+  // Get ALL packages with status false for stats calculation
+  // No limit/offset applied - this gets ALL records regardless of pagination
+  const { data: statusFalsePackages, error: statusFalseError } = await db
+    .from('custom_packages')
+    .select('total_items, total_estimated_value')
+    .eq('pharmacy_id', pharmacyId)
+    .eq('status', false);
+
+  if (statusFalseError) {
+    throw new AppError(`Failed to fetch status false packages: ${statusFalseError.message}`, 400);
+  }
+
+  // Calculate stats for status false packages only
+  const totalProducts = (statusFalsePackages || []).reduce((sum, pkg: any) => {
+    const items = pkg.total_items || 0;
+    return sum + (typeof items === 'number' ? items : parseInt(items.toString()) || 0);
+  }, 0);
+  
+  const totalValue = (statusFalsePackages || []).reduce((sum, pkg: any) => {
+    const value = pkg.total_estimated_value;
+    if (value === null || value === undefined) return sum;
+    const numValue = typeof value === 'number' ? value : parseFloat(value.toString());
+    return sum + (isNaN(numValue) ? 0 : numValue);
+  }, 0);
+
   return {
     packages: packagesWithItems,
     total: count || 0,
+    stats: {
+      totalProducts,
+      totalValue: Math.round(totalValue * 100) / 100,
+      deliveredPackages: deliveredPackagesCount || 0,
+      nonDeliveredPackages: nonDeliveredPackagesCount || 0,
+    },
   };
 };
 
@@ -439,21 +502,30 @@ export const deleteCustomPackage = async (
 
   const db = supabaseAdmin;
 
-  // Check if package exists and belongs to pharmacy
-  const { data: packageRecord, error: checkError } = await db
+  // First, check if package exists (without pharmacy_id filter to see if it exists at all)
+  const { data: packageExists, error: existsError } = await db
     .from('custom_packages')
-    .select('id, status')
+    .select('id, status, pharmacy_id')
     .eq('id', packageId)
-    .eq('pharmacy_id', pharmacyId)
     .single();
 
-  if (checkError || !packageRecord) {
-    throw new AppError('Package not found or you do not have permission to delete it', 404);
+  if (existsError || !packageExists) {
+    throw new AppError('Package not found', 404);
   }
 
-  // Only allow deletion of draft packages
-  if (packageRecord.status !== 'draft') {
-    throw new AppError(`Cannot delete package with status: ${packageRecord.status}. Only draft packages can be deleted.`, 400);
+  // Check if package belongs to the pharmacy
+  if (packageExists.pharmacy_id !== pharmacyId) {
+    throw new AppError('You do not have permission to delete this package', 403);
+  }
+
+  // Check status - handle both boolean and string values (for migration compatibility)
+  const isStatusFalse = packageExists.status === false || 
+                        packageExists.status === 'false' || 
+                        packageExists.status === 0 ||
+                        packageExists.status === 'draft';
+
+  if (!isStatusFalse) {
+    throw new AppError(`Cannot delete package with status: ${packageExists.status}. Only packages with status false can be deleted.`, 400);
   }
 
   // Delete package (items will be deleted automatically due to CASCADE)
@@ -466,5 +538,115 @@ export const deleteCustomPackage = async (
   if (deleteError) {
     throw new AppError(`Failed to delete package: ${deleteError.message}`, 400);
   }
+};
+
+// Toggle package status (true to false, false to true)
+export const updatePackageStatus = async (
+  pharmacyId: string,
+  packageId: string
+): Promise<CustomPackage> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  // Check if package exists and belongs to pharmacy
+  const { data: packageRecord, error: checkError } = await db
+    .from('custom_packages')
+    .select('*')
+    .eq('id', packageId)
+    .eq('pharmacy_id', pharmacyId)
+    .single();
+
+  if (checkError || !packageRecord) {
+    throw new AppError('Package not found or you do not have permission to update it', 404);
+  }
+
+  // Get current status and toggle it
+  const currentStatus = packageRecord.status === true || packageRecord.status === 'true';
+  const newStatus = !currentStatus;
+
+  // Update status (toggle)
+  const { data: updatedPackage, error: updateError } = await db
+    .from('custom_packages')
+    .update({
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', packageId)
+    .eq('pharmacy_id', pharmacyId)
+    .select()
+    .single();
+
+  if (updateError) {
+    throw new AppError(`Failed to update package status: ${updateError.message}`, 400);
+  }
+
+  // Get package items
+  const { data: items, error: itemsError } = await db
+    .from('custom_package_items')
+    .select('*')
+    .eq('package_id', packageId);
+
+  if (itemsError) {
+    throw new AppError(`Failed to fetch package items: ${itemsError.message}`, 400);
+  }
+
+  // Get distributor contact info if distributor_id exists
+  let distributorContact: CustomPackage['distributorContact'] | undefined;
+  if (updatedPackage.distributor_id) {
+    const { data: distributor, error: distError } = await db
+      .from('reverse_distributors')
+      .select('id, name, contact_email, contact_phone, address')
+      .eq('id', updatedPackage.distributor_id)
+      .single();
+
+    if (!distError && distributor) {
+      let location: string | undefined;
+      if (distributor.address) {
+        const addr = distributor.address;
+        const locationParts: string[] = [];
+
+        if (addr.street) locationParts.push(addr.street);
+        if (addr.city) locationParts.push(addr.city);
+        if (addr.state) locationParts.push(addr.state);
+        if (addr.zipCode) locationParts.push(addr.zipCode);
+        if (addr.country) locationParts.push(addr.country);
+
+        if (locationParts.length > 0) {
+          location = locationParts.join(', ');
+        }
+      }
+
+      distributorContact = {
+        email: distributor.contact_email || undefined,
+        phone: distributor.contact_phone || undefined,
+        location,
+      };
+    }
+  }
+
+  return {
+    id: updatedPackage.id,
+    packageNumber: updatedPackage.package_number,
+    pharmacyId: updatedPackage.pharmacy_id,
+    distributorName: updatedPackage.distributor_name,
+    distributorId: updatedPackage.distributor_id || undefined,
+    distributorContact,
+    items: (items || []).map((item: any) => ({
+      ndc: item.ndc,
+      productName: item.product_name,
+      quantity: item.quantity,
+      pricePerUnit: item.price_per_unit,
+      totalValue: item.total_value,
+    })),
+    totalItems: updatedPackage.total_items,
+    totalEstimatedValue: updatedPackage.total_estimated_value,
+    notes: updatedPackage.notes || undefined,
+    status: updatedPackage.status,
+    createdAt: updatedPackage.created_at,
+    updatedAt: updatedPackage.updated_at,
+  };
 };
 
