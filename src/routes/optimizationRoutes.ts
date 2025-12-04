@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getOptimizationRecommendationsHandler, getPackageRecommendationsHandler, getPackageRecommendationsByNdcsHandler, getDistributorSuggestionsHandler } from '../controllers/optimizationController';
+import customPackagesRoutes from './customPackagesRoutes';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
@@ -390,6 +391,9 @@ router.get('/packages/by-ndc', getPackageRecommendationsByNdcsHandler);
  *                   message: "You don't have this product in your inventory. NDC: 45963-0142-05, Product: Fluoxetine"
  */
 router.post('/suggestions', getDistributorSuggestionsHandler);
+
+// Custom packages routes
+router.use('/custom-packages', customPackagesRoutes);
 
 export default router;
 
