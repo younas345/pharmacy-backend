@@ -98,7 +98,60 @@ export const getProductListItems = async (pharmacyId: string): Promise<ProductLi
     throw new AppError(`Failed to fetch product list items: ${error.message}`, 400);
   }
 
-  return items || [];
+  if (!items || items.length === 0) {
+    return [];
+  }
+
+  // Get all package items for this pharmacy to calculate quantities used in packages
+  // First, get all package IDs for this pharmacy
+  const { data: packages, error: packagesError } = await db
+    .from('custom_packages')
+    .select('id')
+    .eq('pharmacy_id', pharmacyId);
+
+  if (packagesError) {
+    throw new AppError(`Failed to fetch packages: ${packagesError.message}`, 400);
+  }
+
+  const packageIds = (packages || []).map((pkg: any) => pkg.id);
+
+  // Get all package items for these packages, grouped by NDC
+  let packageItemsByNdc: Record<string, number> = {};
+  
+  if (packageIds.length > 0) {
+    const { data: packageItems, error: packageItemsError } = await db
+      .from('custom_package_items')
+      .select('ndc, quantity')
+      .in('package_id', packageIds);
+
+    if (packageItemsError) {
+      throw new AppError(`Failed to fetch package items: ${packageItemsError.message}`, 400);
+    }
+
+    // Sum quantities by NDC
+    (packageItems || []).forEach((item: any) => {
+      const ndc = item.ndc;
+      const quantity = item.quantity || 0;
+      if (packageItemsByNdc[ndc]) {
+        packageItemsByNdc[ndc] += quantity;
+      } else {
+        packageItemsByNdc[ndc] = quantity;
+      }
+    });
+  }
+
+  // Decrease quantities based on packages
+  const adjustedItems = items.map((item) => {
+    const usedQuantity = packageItemsByNdc[item.ndc] || 0;
+    const adjustedQuantity = Math.max(0, item.quantity - usedQuantity);
+    
+    return {
+      ...item,
+      quantity: adjustedQuantity,
+    };
+  });
+
+  return adjustedItems;
 };
 
 // Update product list item
