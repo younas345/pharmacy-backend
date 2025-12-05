@@ -49,9 +49,695 @@ export const extractTextFromPDF = async (pdfBuffer: Buffer): Promise<string> => 
   }
 };
 
+// Extract PDF text in chunks with minimal overlap to ensure no data is missed
+export const extractTextFromPDFChunks = async (pdfBuffer: Buffer, pagesPerChunk: number = 5): Promise<Array<{ chunkIndex: number; text: string; pageRange: string }>> => {
+  try {
+    const data = await pdf(pdfBuffer);
+    const totalPages = data.numpages;
+    const totalText = data.text;
+    const chunks: Array<{ chunkIndex: number; text: string; pageRange: string }> = [];
+    
+    // Estimate characters per page
+    const estimatedCharsPerPage = totalPages > 0 ? Math.ceil(totalText.length / totalPages) : 2500;
+    const charsPerChunk = estimatedCharsPerPage * pagesPerChunk;
+    // Minimal overlap: only 2% or max 200 chars to minimize duplicate data across chunks
+    // This ensures chunks are mostly distinct while still catching items that span boundaries
+    const overlapSize = Math.min(200, Math.floor(charsPerChunk * 0.02)); // 2% overlap or max 200 chars
+    const estimatedTotalPages = totalPages || Math.ceil(totalText.length / estimatedCharsPerPage);
+    
+    // Helper function to find the best break point (prefer table row boundaries, item boundaries)
+    const findBestBreakPoint = (startIndex: number, targetEndIndex: number): number => {
+      const searchWindow = Math.min(3000, targetEndIndex - startIndex); // Search up to 3000 chars back
+      const searchStart = Math.max(startIndex, targetEndIndex - searchWindow);
+      
+      // Priority 1: Look for patterns that indicate item boundaries (NDC codes, table rows)
+      // Pattern: newline followed by NDC-like pattern (digits-dashes) or clear item separators
+      const itemBoundaryPattern = /\n\s*(\d{4,5}-\d{3,5}-\d{2,3}|\d{8,11})/;
+      let bestMatch = -1;
+      
+      // Search backwards from target end for item boundaries
+      for (let i = targetEndIndex; i >= searchStart; i--) {
+        const remaining = totalText.substring(i, Math.min(i + 100, totalText.length));
+        if (itemBoundaryPattern.test(remaining)) {
+          bestMatch = i;
+          break;
+        }
+      }
+      
+      // Priority 2: Look for double newlines (paragraph breaks)
+      if (bestMatch === -1) {
+        const doubleNewlineIndex = totalText.lastIndexOf('\n\n', targetEndIndex);
+        if (doubleNewlineIndex > searchStart) {
+          bestMatch = doubleNewlineIndex + 2;
+        }
+      }
+      
+      // Priority 3: Look for single newline followed by whitespace (likely table row)
+      if (bestMatch === -1) {
+        const newlineIndex = totalText.lastIndexOf('\n', targetEndIndex);
+        if (newlineIndex > searchStart && newlineIndex < targetEndIndex - 50) {
+          // Check if next 50 chars look like a table row (has multiple spaces or tabs)
+          const nextChars = totalText.substring(newlineIndex, Math.min(newlineIndex + 50, totalText.length));
+          if (/\s{3,}/.test(nextChars)) {
+            bestMatch = newlineIndex + 1;
+          }
+        }
+      }
+      
+      // If no good break point found, use target end (but try to avoid cutting mid-word)
+      if (bestMatch === -1) {
+        // Try to break at word boundary (space or punctuation)
+        for (let i = targetEndIndex; i >= searchStart && i >= targetEndIndex - 200; i--) {
+          const char = totalText[i];
+          if (char === ' ' || char === '\t' || char === '\n' || /[.,;:]/.test(char)) {
+            bestMatch = i + 1;
+            break;
+          }
+        }
+        if (bestMatch === -1) {
+          bestMatch = targetEndIndex;
+        }
+      }
+      
+      return bestMatch;
+    };
+    
+    // Split text into chunks with overlap
+    let currentIndex = 0;
+    let chunkIndex = 0;
+    
+    while (currentIndex < totalText.length) {
+      const targetChunkEnd = Math.min(currentIndex + charsPerChunk, totalText.length);
+      
+      // Find the best break point near the target end
+      let actualChunkEnd = findBestBreakPoint(currentIndex, targetChunkEnd);
+      
+      // Ensure we don't go past the end
+      actualChunkEnd = Math.min(actualChunkEnd, totalText.length);
+      
+      // Extract chunk text
+      const chunkText = totalText.substring(currentIndex, actualChunkEnd);
+      
+      // Calculate page range
+      const estimatedStartPage = Math.floor(currentIndex / estimatedCharsPerPage) + 1;
+      const estimatedEndPage = Math.min(Math.ceil(actualChunkEnd / estimatedCharsPerPage), estimatedTotalPages);
+      
+      chunks.push({
+        chunkIndex: chunkIndex,
+        text: chunkText,
+        pageRange: `Pages ${estimatedStartPage}-${estimatedEndPage} (chunk ${chunkIndex + 1})`,
+      });
+      
+      // Move to next chunk with minimal overlap (go back by overlap size to ensure nothing is missed)
+      if (actualChunkEnd >= totalText.length) {
+        break; // Last chunk
+      }
+      
+      // Start next chunk with minimal overlap - ensure we make at least 95% progress to minimize duplication
+      // Only use overlap if we're near the end of the document or if we need to catch boundary items
+      const minProgress = Math.floor(charsPerChunk * 0.95); // Must make at least 95% progress
+      const overlapStart = actualChunkEnd - overlapSize;
+      // Use the maximum of: (end - small overlap) or (start + 95% of chunk size) to ensure progress
+      const nextChunkStart = Math.max(overlapStart, currentIndex + minProgress);
+      currentIndex = Math.floor(nextChunkStart);
+      chunkIndex++;
+    }
+    
+    console.log(`📄 PDF split into ${chunks.length} chunks (${pagesPerChunk} pages per chunk, ${totalPages || estimatedTotalPages} total pages, ~${Math.round(estimatedCharsPerPage)} chars/page, ${Math.round(overlapSize)} chars overlap)`);
+    return chunks;
+  } catch (error: any) {
+    throw new AppError(`Failed to extract text from PDF in chunks: ${error.message}`, 400);
+  }
+};
+
+// Helper function to remove empty arrays and objects from chunk results
+const cleanChunkResult = (data: any): any => {
+  if (data === null || data === undefined) {
+    return null;
+  }
+  
+  if (Array.isArray(data)) {
+    const filtered = data.map(cleanChunkResult).filter(item => item !== null && item !== undefined);
+    return filtered.length > 0 ? filtered : null;
+  }
+  
+  if (typeof data === 'object') {
+    const cleaned: any = {};
+    for (const key of Object.keys(data)) {
+      const cleanedValue = cleanChunkResult(data[key]);
+      // Only keep non-null, non-empty values
+      if (cleanedValue !== null && cleanedValue !== undefined) {
+        if (Array.isArray(cleanedValue) && cleanedValue.length === 0) {
+          continue; // Skip empty arrays
+        }
+        if (typeof cleanedValue === 'object' && !Array.isArray(cleanedValue) && Object.keys(cleanedValue).length === 0) {
+          continue; // Skip empty objects
+        }
+        cleaned[key] = cleanedValue;
+      }
+    }
+    return Object.keys(cleaned).length > 0 ? cleaned : null;
+  }
+  
+  // Return primitive values as-is
+  return data;
+};
+
+// Comprehensive JSON repair function (shared between extraction functions)
+const repairJson = (jsonString: string): string => {
+  let result = '';
+  let inString = false;
+  let escapeNext = false;
+  
+  // Step 1: Escape unescaped newlines and special characters in strings
+  for (let i = 0; i < jsonString.length; i++) {
+    const char = jsonString[i];
+    const prevChar = i > 0 ? jsonString[i - 1] : '';
+    
+    if (escapeNext) {
+      result += char;
+      escapeNext = false;
+      continue;
+    }
+    
+    if (char === '\\') {
+      result += char;
+      escapeNext = true;
+      continue;
+    }
+    
+    if (char === '"' && prevChar !== '\\') {
+      inString = !inString;
+      result += char;
+      continue;
+    }
+    
+    if (inString && (char === '\n' || char === '\r')) {
+      if (char === '\r' && jsonString[i + 1] === '\n') {
+        result += '\\r\\n';
+        i++;
+      } else if (char === '\n') {
+        result += '\\n';
+      } else if (char === '\r') {
+        result += '\\r';
+      }
+    } else {
+      result += char;
+    }
+  }
+  
+  // Step 2: Remove trailing commas before closing braces/brackets
+  result = result.replace(/,(\s*[}\]])/g, '$1');
+  
+  // Step 3: Remove any whitespace between key structural elements
+  // This helps with cases where there's unexpected whitespace
+  result = result.replace(/,\s*([}\]])/g, '$1');
+  
+  // Step 4: Try to fix incomplete arrays/objects at the end
+  // Count opening and closing braces/brackets
+  let openBraces = (result.match(/\{/g) || []).length;
+  let closeBraces = (result.match(/\}/g) || []).length;
+  let openBrackets = (result.match(/\[/g) || []).length;
+  let closeBrackets = (result.match(/\]/g) || []).length;
+  
+  // Add missing closing brackets/braces if needed
+  while (closeBrackets < openBrackets) {
+    result += ']';
+    closeBrackets++;
+  }
+  while (closeBraces < openBraces) {
+    result += '}';
+    closeBraces++;
+  }
+  
+  return result;
+};
+
+// Extract structured data from a single chunk (returns JSON only, no explanations)
+export const extractStructuredDataFromChunk = async (
+  pdfText: string,
+  chunkIndex: number,
+  isFirstChunk: boolean = false
+): Promise<Partial<ReturnReportData>> => {
+  try {
+    // Increased max tokens to 40000 to ensure all items can be extracted from large chunks
+    const maxTokens = parseInt(process.env.OPENAI_MAX_TOKENS || '40000', 10);
+
+    const systemPrompt = `You are a JSON extraction expert for pharmacy credit reports. You MUST extract EVERY item you see - do not skip any.
+
+CRITICAL: Extract ALL items from this chunk. Even if an item is partially visible or at the chunk boundary, extract it. Do NOT skip items.
+
+Return data in this EXACT structure:
+
+{
+  "reverseDistributor": null,
+  "reverseDistributorInfo": {
+    "name": null,
+    "contactEmail": null,
+    "contactPhone": null,
+    "address": {
+      "street": null,
+      "city": null,
+      "state": null,
+      "zipCode": null,
+      "country": null
+    },
+    "portalUrl": null,
+    "supportedFormats": null
+  },
+  "pharmacy": null,
+  "reportDate": null,
+  "creditReportNumber": null,
+  "items": [],
+  "totalCreditAmount": null,
+  "totalItems": null
+}
+
+EXTRACTION RULES:
+1. Extract EVERY item you see in the chunk - do not skip any
+2. If an item is partially visible (e.g., cut off at chunk boundary), extract what you can see
+3. Only include items with manufacturer, pricePerUnit, and expirationDate (all three required)
+4. Calculate pricePerUnit = creditAmount / quantity if needed
+5. Convert dates to YYYY-MM-DD format
+6. NDC format: XXXXX-XXXX-XX
+7. Use null for missing values (literal null, not string "null")
+8. If running out of tokens, complete the current item properly, then close arrays/objects with ] and }
+
+CRITICAL - JSON VALIDITY:
+- You MUST return ONLY valid JSON - no text before or after
+- NO trailing commas (e.g., {"field": "value",} is INVALID)
+- NO unescaped quotes or newlines in strings
+- Test mentally: your response must be parseable by JSON.parse() with ZERO modifications
+
+REMEMBER: Extract ALL items - completeness is more important than perfection.`;
+
+    const userPrompt = `Extract all data from this chunk (chunk ${chunkIndex + 1}) of a pharmacy return report and return as JSON:\n\n${pdfText}`;
+
+    const response = await client.chat.completions.create({
+      model: deployment as string,
+      messages: [
+        {
+          role: 'system',
+          content: systemPrompt,
+        },
+        {
+          role: 'user',
+          content: userPrompt,
+        },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.0, // Zero temperature for most deterministic/consistent JSON output
+      response_format: { type: 'json_object' } as any,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new AppError('No response from Azure OpenAI', 500);
+    }
+
+    // Check if response was truncated (finish_reason === 'length' means max_tokens was reached)
+    const finishReason = response.choices[0]?.finish_reason;
+    if (finishReason === 'length') {
+      console.warn(`⚠️  WARNING: Chunk ${chunkIndex + 1} response was truncated (max_tokens reached). Some items may be missing. Consider increasing max_tokens.`);
+    }
+
+    // Parse JSON - Azure OpenAI with response_format json_object should return valid JSON
+    let jsonData: Partial<ReturnReportData>;
+    try {
+      // Simply parse the content - it should already be valid JSON from Azure OpenAI
+      jsonData = JSON.parse(content);
+    } catch (parseError: any) {
+      // If parsing fails, log detailed error information
+      console.error(`❌ JSON Parse Error in chunk ${chunkIndex + 1}:`, parseError.message);
+      console.error(`❌ Raw content length:`, content.length);
+      console.error(`❌ Content (first 300 chars):`, content.substring(0, 300));
+      
+      const errorPosition = parseError.message.match(/position (\d+)/)?.[1];
+      if (errorPosition) {
+        const pos = parseInt(errorPosition);
+        const start = Math.max(0, pos - 150);
+        const end = Math.min(content.length, pos + 150);
+        console.error(`❌ Content around error position ${pos}:`, content.substring(start, end));
+      }
+      
+      // Last resort: try to repair only if absolutely necessary
+      try {
+        console.log(`⚠️  Attempting minimal repair for chunk ${chunkIndex + 1}...`);
+        const repaired = repairJson(content);
+        jsonData = JSON.parse(repaired);
+        console.log(`✅ Chunk ${chunkIndex + 1} repaired successfully`);
+      } catch (repairError: any) {
+        throw new AppError(
+          `Chunk ${chunkIndex + 1}: Azure OpenAI returned invalid JSON. Original error: ${parseError.message}. Repair failed: ${repairError.message}`,
+          500
+        );
+      }
+    }
+
+    return jsonData;
+  } catch (error: any) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    throw new AppError(`Failed to extract structured data from chunk: ${error.message}`, 500);
+  }
+};
+
+/**
+ * Normalize item fields to match the expected interface structure
+ * Handles variations like "ndc" vs "ndcCode", "productDescription" vs "itemName"
+ * Converts null values to undefined to match the interface
+ */
+const normalizeItem = (item: any): {
+  ndcCode?: string;
+  itemName?: string;
+  manufacturer?: string;
+  lotNumber?: string;
+  expirationDate?: string;
+  quantity?: number;
+  creditAmount?: number;
+  pricePerUnit?: number;
+} => {
+  const normalized: {
+    ndcCode?: string;
+    itemName?: string;
+    manufacturer?: string;
+    lotNumber?: string;
+    expirationDate?: string;
+    quantity?: number;
+    creditAmount?: number;
+    pricePerUnit?: number;
+  } = {
+    ndcCode: item.ndcCode || item.ndc || undefined,
+    itemName: item.itemName || item.productDescription || undefined,
+    manufacturer: item.manufacturer || undefined,
+    lotNumber: item.lotNumber || undefined,
+    expirationDate: item.expirationDate || undefined,
+    quantity: item.quantity !== undefined && item.quantity !== null ? Number(item.quantity) : undefined,
+    creditAmount: item.creditAmount !== undefined && item.creditAmount !== null ? Number(item.creditAmount) : undefined,
+    pricePerUnit: item.pricePerUnit !== undefined && item.pricePerUnit !== null ? Number(item.pricePerUnit) : undefined,
+  };
+  
+  // Calculate pricePerUnit if missing but creditAmount and quantity are available
+  if (!normalized.pricePerUnit && normalized.creditAmount && normalized.quantity && normalized.quantity > 0) {
+    normalized.pricePerUnit = Math.round((normalized.creditAmount / normalized.quantity) * 100) / 100;
+  }
+  
+  return normalized;
+};
+
+// Merge all chunk results programmatically (no AI - more reliable and faster)
+// Custom TypeScript function that handles all merge rules and field normalization
+export const mergeChunkResults = (chunkResults: Array<Partial<ReturnReportData>>): ReturnReportData => {
+  console.log(`🔀 Programmatically merging ${chunkResults.length} chunks (custom TS function, no AI)...`);
+  
+  // Track statistics for logging
+  let totalItemsBeforeMerge = 0;
+  let totalItemsAfterFilter = 0;
+  let totalItemsAfterDedup = 0;
+  
+  // Initialize merged data with empty values
+  const mergedData: ReturnReportData = {
+    reverseDistributor: undefined,
+    reverseDistributorInfo: undefined,
+    pharmacy: undefined,
+    reportDate: undefined,
+    creditReportNumber: undefined,
+    items: [],
+    totalCreditAmount: 0,
+    totalItems: 0,
+  };
+  
+  // Merge all chunks
+  for (let chunkIdx = 0; chunkIdx < chunkResults.length; chunkIdx++) {
+    const chunk = chunkResults[chunkIdx];
+    if (!chunk) {
+      console.warn(`⚠️  Chunk ${chunkIdx + 1} is null or undefined, skipping...`);
+      continue;
+    }
+    
+    const chunkItemCount = chunk.items?.length || 0;
+    totalItemsBeforeMerge += chunkItemCount;
+    
+    if (chunkItemCount > 0) {
+      console.log(`  📦 Chunk ${chunkIdx + 1}: Adding ${chunkItemCount} items to merge pool`);
+    }
+    
+    // Merge distributor info (use first non-null value found, but prefer more complete data)
+    if (chunk.reverseDistributor) {
+      if (!mergedData.reverseDistributor) {
+        mergedData.reverseDistributor = chunk.reverseDistributor;
+      } else if (chunk.reverseDistributor.length > mergedData.reverseDistributor.length) {
+        // Prefer longer/more complete distributor name
+        mergedData.reverseDistributor = chunk.reverseDistributor;
+      }
+    }
+    
+    // Merge distributor info object (merge fields from all chunks, prefer more complete data)
+    if (chunk.reverseDistributorInfo) {
+      if (!mergedData.reverseDistributorInfo) {
+        mergedData.reverseDistributorInfo = { ...chunk.reverseDistributorInfo };
+      } else {
+        // Merge individual fields - prefer non-null values, and longer/more complete values
+        const info = mergedData.reverseDistributorInfo;
+        const chunkInfo = chunk.reverseDistributorInfo;
+        
+        if (chunkInfo.name && (!info.name || chunkInfo.name.length > info.name.length)) {
+          info.name = chunkInfo.name;
+        }
+        if (chunkInfo.contactEmail && (!info.contactEmail || chunkInfo.contactEmail.length > info.contactEmail.length)) {
+          info.contactEmail = chunkInfo.contactEmail;
+        }
+        if (chunkInfo.contactPhone && (!info.contactPhone || chunkInfo.contactPhone.length > info.contactPhone.length)) {
+          info.contactPhone = chunkInfo.contactPhone;
+        }
+        if (chunkInfo.portalUrl && (!info.portalUrl || chunkInfo.portalUrl.length > info.portalUrl.length)) {
+          info.portalUrl = chunkInfo.portalUrl;
+        }
+        if (chunkInfo.supportedFormats && (!info.supportedFormats || chunkInfo.supportedFormats.length > info.supportedFormats.length)) {
+          info.supportedFormats = chunkInfo.supportedFormats;
+        }
+        
+        // Merge address - prefer more complete addresses
+        if (chunkInfo.address) {
+          if (!info.address) {
+            info.address = { ...chunkInfo.address };
+          } else {
+            // Count non-null fields to determine which address is more complete
+            const existingFields = Object.values(info.address).filter(v => v !== null && v !== undefined).length;
+            const newFields = Object.values(chunkInfo.address).filter(v => v !== null && v !== undefined).length;
+            
+            if (newFields > existingFields) {
+              // New address is more complete, merge it
+              info.address = { ...info.address, ...chunkInfo.address };
+            } else {
+              // Merge individual fields, prefer non-null values
+              if (!info.address.street && chunkInfo.address.street) info.address.street = chunkInfo.address.street;
+              if (!info.address.city && chunkInfo.address.city) info.address.city = chunkInfo.address.city;
+              if (!info.address.state && chunkInfo.address.state) info.address.state = chunkInfo.address.state;
+              if (!info.address.zipCode && chunkInfo.address.zipCode) info.address.zipCode = chunkInfo.address.zipCode;
+              if (!info.address.country && chunkInfo.address.country) info.address.country = chunkInfo.address.country;
+            }
+          }
+        }
+      }
+    }
+    
+    // Merge pharmacy name (use first non-null value, prefer longer/more complete)
+    if (chunk.pharmacy) {
+      if (!mergedData.pharmacy) {
+        mergedData.pharmacy = chunk.pharmacy;
+      } else if (chunk.pharmacy.length > mergedData.pharmacy.length) {
+        mergedData.pharmacy = chunk.pharmacy;
+      }
+    }
+    
+    // Merge report date (use first non-null value)
+    if (!mergedData.reportDate && chunk.reportDate) {
+      mergedData.reportDate = chunk.reportDate;
+    }
+    
+    // Merge credit report number (use first non-null value)
+    if (!mergedData.creditReportNumber && chunk.creditReportNumber) {
+      mergedData.creditReportNumber = chunk.creditReportNumber;
+    }
+    
+    // Normalize and merge items array (normalize field names first, then concatenate - duplicates will be removed later)
+    if (chunk.items && chunk.items.length > 0) {
+      // Normalize all items in this chunk to ensure consistent field names
+      const normalizedItems = chunk.items.map(item => normalizeItem(item));
+      mergedData.items = [...(mergedData.items || []), ...normalizedItems];
+    }
+  }
+  
+  console.log(`📊 Merge statistics: ${totalItemsBeforeMerge} total items collected from all chunks`);
+  
+  // Filter out items with null manufacturer, pricePerUnit, or expirationDate
+  if (mergedData.items && mergedData.items.length > 0) {
+    const originalCount = mergedData.items.length;
+    const filteredItems = mergedData.items.filter(item => {
+      return item.manufacturer !== null && 
+             item.manufacturer !== undefined && 
+             item.pricePerUnit !== null && 
+             item.pricePerUnit !== undefined &&
+             item.expirationDate !== null && 
+             item.expirationDate !== undefined;
+    });
+    
+    totalItemsAfterFilter = filteredItems.length;
+    
+    if (originalCount !== filteredItems.length) {
+      console.log(`🧹 Filtered out ${originalCount - filteredItems.length} items with null manufacturer, pricePerUnit, or expirationDate`);
+      console.log(`   📊 Items after filter: ${filteredItems.length} (from ${originalCount} total)`);
+    }
+    
+    // Deduplicate items (due to chunk overlap, same item might appear in multiple chunks)
+    // Use NDC + lotNumber + expirationDate as unique key
+    // Improved: Also consider quantity and creditAmount to better identify duplicates
+    const itemMap = new Map<string, typeof mergedData.items[0]>();
+    let duplicatesRemoved = 0;
+    
+    for (const item of filteredItems) {
+      // Create unique key: NDC + lotNumber + expirationDate
+      // Normalize NDC code (remove dashes/spaces for comparison)
+      // Handle both ndcCode and ndc field names
+      const ndcValue = item.ndcCode || (item as any).ndc || 'NO_NDC';
+      const normalizedNdc = String(ndcValue).replace(/[-\s]/g, '').toUpperCase();
+      const normalizedLot = (item.lotNumber || 'NO_LOT').trim().toUpperCase();
+      const normalizedExp = (item.expirationDate || 'NO_EXP').trim();
+      const key = `${normalizedNdc}_${normalizedLot}_${normalizedExp}`;
+      
+      if (itemMap.has(key)) {
+        // Item already exists - keep the one with more complete data
+        const existing = itemMap.get(key)!;
+        
+        // Calculate completeness score (number of non-null fields)
+        const existingCompleteness = Object.values(existing).filter(v => v !== null && v !== undefined && v !== '').length;
+        const newCompleteness = Object.values(item).filter(v => v !== null && v !== undefined && v !== '').length;
+        
+        // Also check if quantities/amounts match (if they differ significantly, might be different items)
+        const existingQty = existing.quantity || 0;
+        const newQty = item.quantity || 0;
+        const existingCredit = existing.creditAmount || 0;
+        const newCredit = item.creditAmount || 0;
+        
+        // If quantities/credits are very different, might be different items - keep both by modifying key
+        if (Math.abs(existingQty - newQty) > 0.01 || Math.abs(existingCredit - newCredit) > 0.01) {
+          // Different quantities/amounts - might be different items, use quantity in key
+          const uniqueKey = `${key}_QTY${newQty}_CREDIT${newCredit}`;
+          itemMap.set(uniqueKey, item);
+          console.log(`  ⚠️  Item with same NDC/Lot/Exp but different qty/credit - treating as separate: ${ndcValue}`);
+        } else if (newCompleteness > existingCompleteness) {
+          // New item is more complete, replace existing
+          itemMap.set(key, item);
+          duplicatesRemoved++;
+        } else {
+          // Existing item is more complete or equal, keep existing
+          duplicatesRemoved++;
+        }
+      } else {
+        itemMap.set(key, item);
+      }
+    }
+    
+    totalItemsAfterDedup = itemMap.size;
+    
+    if (duplicatesRemoved > 0) {
+      console.log(`🔄 Removed ${duplicatesRemoved} duplicate items (from chunk overlap)`);
+      console.log(`   📊 Items after deduplication: ${totalItemsAfterDedup} (from ${totalItemsAfterFilter} after filter)`);
+    }
+    
+    mergedData.items = Array.from(itemMap.values());
+  }
+  
+  // Calculate totals
+  if (mergedData.items && mergedData.items.length > 0) {
+    mergedData.totalItems = mergedData.items.length;
+    mergedData.totalCreditAmount = mergedData.items.reduce((sum, item) => {
+      return sum + (item.creditAmount || 0);
+    }, 0);
+    mergedData.totalCreditAmount = Math.round(mergedData.totalCreditAmount * 100) / 100;
+  }
+  
+  // Final merge summary
+  console.log(`✅ Merge complete:`);
+  console.log(`   📊 Items: ${totalItemsBeforeMerge} collected → ${totalItemsAfterFilter} after filter → ${totalItemsAfterDedup} after deduplication`);
+  console.log(`   💰 Total credit: $${mergedData.totalCreditAmount}`);
+  console.log(`   📋 Final item count: ${mergedData.items?.length || 0}`);
+  
+  // Warn if significant data loss occurred
+  if (totalItemsBeforeMerge > 0) {
+    const dataLossPercent = ((totalItemsBeforeMerge - (mergedData.items?.length || 0)) / totalItemsBeforeMerge) * 100;
+    if (dataLossPercent > 10) {
+      console.warn(`⚠️  WARNING: ${dataLossPercent.toFixed(1)}% of items were filtered/removed during merge. This might indicate data quality issues.`);
+    }
+  }
+  
+  return mergedData;
+};
+
+// Helper function to add delay
+const delay = (ms: number): Promise<void> => {
+  return new Promise(resolve => setTimeout(resolve, ms));
+};
+
+// Process chunks in parallel batches
+export const processChunksInParallel = async (
+  chunks: Array<{ chunkIndex: number; text: string; pageRange: string }>,
+  batchSize: number = 5
+): Promise<Array<Partial<ReturnReportData>>> => {
+  const results: Array<Partial<ReturnReportData>> = [];
+  
+  // Process in batches
+  for (let i = 0; i < chunks.length; i += batchSize) {
+    const batch = chunks.slice(i, i + batchSize);
+    const batchStartIndex = i;
+    const batchNumber = Math.floor(i / batchSize) + 1;
+    const totalBatches = Math.ceil(chunks.length / batchSize);
+    
+    console.log(`⚡ Processing batch ${batchNumber}/${totalBatches} (${batch.length} chunks in parallel)...`);
+    
+    // Process all chunks in this batch in parallel
+    const batchPromises = batch.map(async (chunk, indexInBatch) => {
+      const globalIndex = batchStartIndex + indexInBatch;
+      const isFirstChunk = globalIndex === 0;
+      
+      console.log(`  🔄 Chunk ${globalIndex + 1}/${chunks.length} (${chunk.pageRange})...`);
+      
+      try {
+        const chunkData = await extractStructuredDataFromChunk(chunk.text, globalIndex, isFirstChunk);
+        console.log(`  📦 Chunk ${globalIndex + 1} JSON Response:`, JSON.stringify(chunkData, null, 2));
+        console.log(`  ✅ Chunk ${globalIndex + 1}: ${chunkData.items?.length || 0} items`);
+        return { index: globalIndex, data: chunkData };
+      } catch (error: any) {
+        console.error(`  ❌ Chunk ${globalIndex + 1} failed: ${error.message}`);
+        throw new AppError(`Failed to process chunk ${globalIndex + 1}: ${error.message}`, 500);
+      }
+    });
+    
+    // Wait for all chunks in this batch to complete
+    const batchResults = await Promise.all(batchPromises);
+    
+    // Sort by index and add to results
+    batchResults.sort((a, b) => a.index - b.index);
+    for (const result of batchResults) {
+      results.push(result.data);
+    }
+    
+    // Add 5 second delay after each batch (except after the last batch)
+    if (batchNumber < totalBatches) {
+      console.log(`⏳ Waiting 5 seconds before processing next batch...`);
+      await delay(5000);
+    }
+  }
+  
+  return results;
+};
+
 export const extractStructuredData = async (pdfText: string): Promise<ReturnReportData> => {
   try {
-    const maxTokens = parseInt(process.env.OPENAI_MAX_TOKENS || '20000', 10);
+    // Increased max tokens to 40000 to ensure all items can be extracted
+    const maxTokens = parseInt(process.env.OPENAI_MAX_TOKENS || '40000', 10);
 
     const systemPrompt = `You are an expert at extracting structured data from pharmacy credit reports (return reports) from reverse distributors. 
 Your PRIMARY task is to extract comprehensive distributor information AND product/item details from the PDF text.
@@ -205,7 +891,24 @@ CRITICAL EXTRACTION RULES:
   "totalItems": 1
 }
 
-REMEMBER: Extract ALL distributor information you can find in the PDF. Be thorough and search the entire document text, not just the main content area.`;
+═══════════════════════════════════════════════════════════════
+CRITICAL JSON FORMATTING - THIS IS MANDATORY:
+═══════════════════════════════════════════════════════════════
+
+Your response will be directly parsed with JSON.parse(). It MUST be 100% valid JSON.
+
+REQUIREMENTS:
+1. Return ONLY a JSON object - no text before or after
+2. NO trailing commas (e.g., {"field": "value",} is INVALID)
+3. NO unescaped quotes or newlines in strings
+4. Use literal null for missing values (not string "null")
+5. Properly escape special characters: \n for newlines, \" for quotes, \\ for backslashes
+6. NO markdown code blocks, NO comments, NO explanations
+7. All strings in double quotes, all objects/arrays properly closed
+
+If running out of tokens, complete the current item properly, then close all arrays and objects with ] and }.
+
+REMEMBER: Extract ALL distributor information from headers, footers, and contact sections. Be thorough.`;
 
     const userPrompt = `Extract structured data from the following pharmacy return report:\n\n${pdfText}`;
 
@@ -222,7 +925,8 @@ REMEMBER: Extract ALL distributor information you can find in the PDF. Be thorou
         },
       ],
       max_tokens: maxTokens,
-      temperature: 0.1, // Low temperature for more consistent extraction
+      temperature: 0.0, // Zero temperature for most deterministic/consistent JSON output
+      response_format: { type: 'json_object' } as any, // Force JSON response format
     });
 
     const content = response.choices[0]?.message?.content;
@@ -230,19 +934,36 @@ REMEMBER: Extract ALL distributor information you can find in the PDF. Be thorou
       throw new AppError('No response from Azure OpenAI', 500);
     }
 
-    // Try to extract JSON from the response
+    // Parse JSON - Azure OpenAI with response_format json_object should return valid JSON
     let jsonData: ReturnReportData;
     try {
-      // Remove markdown code blocks if present
-      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      jsonData = JSON.parse(cleanedContent);
-    } catch (parseError) {
-      // If direct parsing fails, try to extract JSON object from the text
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        jsonData = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new AppError('Failed to parse JSON from AI response', 500);
+      // Simply parse the content - it should already be valid JSON from Azure OpenAI
+      jsonData = JSON.parse(content);
+    } catch (parseError: any) {
+      // If parsing fails, log detailed error information
+      console.error('❌ JSON Parse Error:', parseError.message);
+      console.error('❌ Raw content length:', content.length);
+      console.error('❌ Content (first 500 chars):', content.substring(0, 500));
+      
+      const errorPosition = parseError.message.match(/position (\d+)/)?.[1];
+      if (errorPosition) {
+        const pos = parseInt(errorPosition);
+        const start = Math.max(0, pos - 150);
+        const end = Math.min(content.length, pos + 150);
+        console.error('❌ Content around error position:', content.substring(start, end));
+      }
+      
+      // Last resort: try to repair only if absolutely necessary
+      try {
+        console.log('⚠️  Attempting minimal repair...');
+        const repaired = repairJson(content);
+        jsonData = JSON.parse(repaired);
+        console.log('✅ JSON repaired successfully');
+      } catch (repairError: any) {
+        throw new AppError(
+          `Azure OpenAI returned invalid JSON. Original error: ${parseError.message}. Repair failed: ${repairError.message}`,
+          500
+        );
       }
     }
 
@@ -460,15 +1181,20 @@ const fakePricesAndDistributor = (data: ReturnReportData): ReturnReportData => {
 };
 
 export const processReturnReport = async (pdfBuffer: Buffer): Promise<ReturnReportData> => {
-  // Step 1: Extract text from PDF
-  const pdfText = await extractTextFromPDF(pdfBuffer);
-  console.log('pdfText', pdfText);
-  if (!pdfText || pdfText.trim().length === 0) {
+  // Step 1: Extract text from PDF in chunks (5 pages per chunk with minimal overlap to ensure nothing is missed)
+  const chunks = await extractTextFromPDFChunks(pdfBuffer, 5);
+  
+  if (chunks.length === 0) {
     throw new AppError('No text could be extracted from the PDF', 400);
   }
 
-  // Step 2: Extract structured data using Azure OpenAI
-  const structuredData = await extractStructuredData(pdfText);
+  console.log(`📦 Processing ${chunks.length} chunks (5 chunks in parallel with overlap protection)...`);
+
+  // Step 2: Process chunks in parallel (5 at a time)
+  const chunkResults = await processChunksInParallel(chunks, 5);
+
+  // Step 3: Merge all chunk results programmatically (fast and reliable)
+  const structuredData = mergeChunkResults(chunkResults);
 
   // Ensure backward compatibility: set reverseDistributor from reverseDistributorInfo if needed
   if (structuredData.reverseDistributorInfo?.name && !structuredData.reverseDistributor) {
@@ -521,10 +1247,20 @@ export const saveReturnReport = async (
   const db = supabaseAdmin;
 
   // Extract items array from the data
-  const items = input.data.items || [];
+  let items = input.data.items || [];
+  
+  // Filter out items with null manufacturer, pricePerUnit, or expirationDate
+  items = items.filter(item => {
+    return item.manufacturer !== null && 
+           item.manufacturer !== undefined && 
+           item.pricePerUnit !== null && 
+           item.pricePerUnit !== undefined &&
+           item.expirationDate !== null && 
+           item.expirationDate !== undefined;
+  });
   
   if (items.length === 0) {
-    throw new AppError('No items to save in return report', 400);
+    throw new AppError('No items to save in return report (all items filtered out due to missing manufacturer, pricePerUnit, or expirationDate)', 400);
   }
 
   // Check if NDC validation is enabled via environment variable
@@ -601,10 +1337,83 @@ export const saveReturnReport = async (
     data: item, // Store each item object as JSONB
   }));
 
-  // Insert all records at once
+  // Check for existing records to prevent duplicates
+  // Get all existing records for this document_id and pharmacy_id
+  const { data: existingRecords, error: fetchError } = await db
+    .from('return_reports')
+    .select('*')
+    .eq('document_id', input.document_id)
+    .eq('pharmacy_id', input.pharmacy_id);
+
+  if (fetchError) {
+    console.warn(`⚠️  Failed to fetch existing records for duplicate check: ${fetchError.message}`);
+    // Continue with insert even if fetch fails
+  }
+
+  // Create a set of existing item keys for fast lookup
+  const existingItemKeys = new Set<string>();
+  if (existingRecords && existingRecords.length > 0) {
+    existingRecords.forEach((record: any) => {
+      const item = record.data;
+      if (item) {
+        // Create unique key: NDC + lotNumber + expirationDate + quantity + creditAmount
+        const normalizedNdc = (item.ndcCode || item.ndc || 'NO_NDC').replace(/[-\s]/g, '').toUpperCase();
+        const normalizedLot = (item.lotNumber || 'NO_LOT').trim().toUpperCase();
+        const normalizedExp = (item.expirationDate || 'NO_EXP').trim();
+        const qty = item.quantity || 0;
+        const credit = item.creditAmount || 0;
+        const key = `${normalizedNdc}_${normalizedLot}_${normalizedExp}_QTY${qty}_CREDIT${credit}`;
+        existingItemKeys.add(key);
+      }
+    });
+    console.log(`🔍 Found ${existingRecords.length} existing records for document ${input.document_id}`);
+  }
+
+  // Filter out duplicates before inserting
+  const uniqueRecordsToInsert: typeof recordsToInsert = [];
+  const duplicateCount = { count: 0 };
+
+  recordsToInsert.forEach((record) => {
+    const item = record.data;
+    if (item) {
+      // Create unique key: NDC + lotNumber + expirationDate + quantity + creditAmount
+      const normalizedNdc = (item.ndcCode || item.ndc || 'NO_NDC').replace(/[-\s]/g, '').toUpperCase();
+      const normalizedLot = (item.lotNumber || 'NO_LOT').trim().toUpperCase();
+      const normalizedExp = (item.expirationDate || 'NO_EXP').trim();
+      const qty = item.quantity || 0;
+      const credit = item.creditAmount || 0;
+      const key = `${normalizedNdc}_${normalizedLot}_${normalizedExp}_QTY${qty}_CREDIT${credit}`;
+
+      if (existingItemKeys.has(key)) {
+        duplicateCount.count++;
+        console.log(`  ⚠️  Duplicate item skipped: ${item.ndcCode || item.ndc || 'NO_NDC'} - ${item.itemName || item.productDescription || 'Unknown'}`);
+      } else {
+        uniqueRecordsToInsert.push(record);
+        // Add to set to prevent duplicates within the same batch
+        existingItemKeys.add(key);
+      }
+    }
+  });
+
+  if (duplicateCount.count > 0) {
+    console.log(`🔄 Removed ${duplicateCount.count} duplicate records before insert`);
+  }
+
+  if (uniqueRecordsToInsert.length === 0) {
+    console.log('ℹ️  All items are duplicates - nothing to insert');
+    // Return existing records that match the ReturnReportRecord interface
+    if (existingRecords && existingRecords.length > 0) {
+      return existingRecords as ReturnReportRecord[];
+    }
+    return [];
+  }
+
+  console.log(`📝 Inserting ${uniqueRecordsToInsert.length} unique records (${recordsToInsert.length - uniqueRecordsToInsert.length} duplicates removed)`);
+
+  // Insert only unique records
   const { data, error } = await db
     .from('return_reports')
-    .insert(recordsToInsert)
+    .insert(uniqueRecordsToInsert)
     .select();
 
   if (error) {
