@@ -19,11 +19,30 @@ const router = express.Router();
  *             type: object
  *             required:
  *               - file
+ *               - pharmacy_id
  *             properties:
  *               file:
  *                 type: string
  *                 format: binary
  *                 description: PDF file containing the return report (max 10MB)
+ *               pharmacy_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: Pharmacy ID (can also be provided as query parameter)
+ *                 example: "123e4567-e89b-12d3-a456-426614174000"
+ *               reverse_distributor_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: Optional reverse distributor ID. If not provided, the system will attempt to find or create one based on the extracted distributor information.
+ *                 example: "123e4567-e89b-12d3-a456-426614174000"
+ *     parameters:
+ *       - in: query
+ *         name: pharmacy_id
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Pharmacy ID (alternative to providing in form data)
+ *         example: "123e4567-e89b-12d3-a456-426614174000"
  *     responses:
  *       200:
  *         description: Return report processed successfully

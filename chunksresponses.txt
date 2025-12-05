@@ -1,0 +1,739 @@
+saboor.malik@2bvision.com@2BVTLP-157-UBUNTU:~/2bvt/pharmacy-backend$ npm run dev
+
+> pharmacy-backend@1.0.0 dev
+> nodemon
+
+[nodemon] 3.1.11
+[nodemon] to restart at any time, enter `rs`
+[nodemon] watching path(s): src/**/*
+[nodemon] watching extensions: ts,json
+[nodemon] starting `ts-node src/server.ts`
+⚠️  Node.js 18 and below are deprecated and will no longer be supported in future versions of @supabase/supabase-js. Please upgrade to Node.js 20 or later. For more information, visit: https://github.com/orgs/supabase/discussions/37217
+Server is running on port 3000
+Swagger documentation available at http://localhost:3000/api-docs
+📄 PDF split into 5 chunks (4 pages per chunk, 12 total pages, ~1507 chars/page, 2000 chars overlap)
+📦 Processing 5 chunks (5 chunks in parallel with overlap protection)...
+⚡ Processing batch 1/1 (5 chunks in parallel)...
+  🔄 Chunk 1/5 (Pages 1-4 (chunk 1))...
+  🔄 Chunk 2/5 (Pages 3-7 (chunk 2))...
+  🔄 Chunk 3/5 (Pages 5-9 (chunk 3))...
+  🔄 Chunk 4/5 (Pages 8-10 (chunk 4))...
+  🔄 Chunk 5/5 (Pages 9-12 (chunk 5))...
+  📦 Chunk 1 JSON Response: {
+  "reverseDistributor": "Return Solutions, Inc.",
+  "reverseDistributorInfo": {
+    "name": "Return Solutions, Inc.",
+    "contactEmail": null,
+    "contactPhone": "800-579-4804",
+    "address": {
+      "street": "10635 Dutchtown Road",
+      "city": "Knoxville",
+      "state": "TN",
+      "zipCode": "37932",
+      "country": "USA"
+    },
+    "portalUrl": "www.drugreturns.com",
+    "supportedFormats": null
+  },
+  "pharmacy": "Boom Pharmacy",
+  "reportDate": "2025-09-23",
+  "creditReportNumber": "3R94Q",
+  "items": [
+    {
+      "manufacturer": "ACCORD HEALTHCARE",
+      "productDescription": "Quetiapine 400mg ER Tablet",
+      "ndc": null,
+      "lotNumber": "RXM2114938",
+      "expirationDate": "2024-09-24",
+      "quantity": 1,
+      "creditAmount": 4.62,
+      "pricePerUnit": 4.62
+    },
+    {
+      "manufacturer": "AJANTA PHARMA",
+      "productDescription": "Varenicline .5mg Tablets",
+      "ndc": null,
+      "lotNumber": "RXPA1684321",
+      "expirationDate": "2025-11-25",
+      "quantity": 1,
+      "creditAmount": 26.26,
+      "pricePerUnit": 26.26
+    },
+    {
+      "manufacturer": "AMNEAL PHARMA",
+      "productDescription": "Atropine Sulfate 1% Ophthalmic Solution",
+      "ndc": null,
+      "lotNumber": "RXAP230338",
+      "expirationDate": "2024-11-24",
+      "quantity": 1,
+      "creditAmount": 8.57,
+      "pricePerUnit": 8.57
+    }
+  ],
+  "totalCreditAmount": 3049.61,
+  "totalItems": 216
+}
+  ✅ Chunk 1: 3 items
+  📦 Chunk 5 JSON Response: {
+  "reverseDistributor": "Return Solutions, Inc.",
+  "reverseDistributorInfo": {
+    "name": "Return Solutions, Inc.",
+    "contactEmail": null,
+    "contactPhone": "800-579-4804",
+    "address": {
+      "street": "10635 Dutchtown Road",
+      "city": "Knoxville",
+      "state": "TN",
+      "zipCode": "37932",
+      "country": "USA"
+    },
+    "portalUrl": "www.drugreturns.com",
+    "supportedFormats": null
+  },
+  "pharmacy": "Boom Pharmacy",
+  "reportDate": "2025-09-23",
+  "creditReportNumber": "3R94Q",
+  "items": [
+    {
+      "manufacturer": "WESTMINSTER PHARMA",
+      "productDescription": "Eplerenone 25mg Tablets",
+      "ndc": "69367-0307-30",
+      "quantity": 1,
+      "creditAmount": 8.77,
+      "pricePerUnit": 8.77,
+      "expirationDate": "2026-02-01"
+    },
+    {
+      "manufacturer": "WESTMINSTER PHARMA",
+      "productDescription": "Zoledronic Acid 4mg/5ml Injection",
+      "ndc": "69367-0190-50",
+      "quantity": 2,
+      "creditAmount": 756.36,
+      "pricePerUnit": 378.18,
+      "expirationDate": "2025-10-25"
+    },
+    {
+      "manufacturer": "SUN PHARMA",
+      "productDescription": "Lurasidone HCL 120mg Tablet",
+      "ndc": "47335-0579-83",
+      "quantity": 1,
+      "creditAmount": 12.39,
+      "pricePerUnit": 12.39,
+      "expirationDate": "2025-10-25"
+    }
+  ],
+  "totalCreditAmount": 777.52,
+  "totalItems": 3
+}
+  ✅ Chunk 5: 3 items
+  📦 Chunk 4 JSON Response: {
+  "reverseDistributor": "Return Solutions, Inc.",
+  "reverseDistributorInfo": {
+    "name": "Return Solutions, Inc.",
+    "contactEmail": null,
+    "contactPhone": "800-579-4804",
+    "address": {
+      "street": "10635 Dutchtown Road",
+      "city": "Knoxville",
+      "state": "TN",
+      "zipCode": "37932",
+      "country": "USA"
+    },
+    "portalUrl": null,
+    "supportedFormats": null
+  },
+  "pharmacy": "Boom Pharmacy",
+  "reportDate": "2025-09-23",
+  "creditReportNumber": "3R94Q",
+  "items": [
+    {
+      "manufacturer": "RISING PHARMA",
+      "productDescription": "Amitriptyline Hcl 100mg Tablets",
+      "ndc": "01101-001A-XX",
+      "lotNumber": "E123008D",
+      "expirationDate": "2025-05-01",
+      "quantity": 3,
+      "creditAmount": 21.48,
+      "pricePerUnit": 7.16
+    },
+    {
+      "manufacturer": "STRIDES PHARMA",
+      "productDescription": "Prednisone 20mg Tablet",
+      "ndc": "64380-0785-07",
+      "lotNumber": "253206A",
+      "expirationDate": "2024-09-01",
+      "quantity": 1,
+      "creditAmount": 26.96,
+      "pricePerUnit": 26.96
+    },
+    {
+      "manufacturer": "SUN PHARMA",
+      "productDescription": "Lurasidone Hcl 80mg Tablets",
+      "ndc": "47335-0685-83",
+      "lotNumber": "240301",
+      "expirationDate": "2025-11-01",
+      "quantity": 1,
+      "creditAmount": 40.82,
+      "pricePerUnit": 40.82
+    },
+    {
+      "manufacturer": "SUN PHARMA",
+      "productDescription": "Desonide 0.05% Topical Lotion",
+      "ndc": "51672-4079-08",
+      "lotNumber": "101181",
+      "expirationDate": "2024-09-01",
+      "quantity": 1,
+      "creditAmount": 7.26,
+      "pricePerUnit": 7.26
+    },
+    {
+      "manufacturer": "TEVA - GENERIC",
+      "productDescription": "Calcitriol 0.25mcg Capsule",
+      "ndc": "00093-7352-01",
+      "lotNumber": "301001",
+      "expirationDate": "2025-11-01",
+      "quantity": 1,
+      "creditAmount": 34.14,
+      "pricePerUnit": 34.14
+    },
+    {
+      "manufacturer": "TEVA - GENERIC",
+      "productDescription": "Bupropion 300mg ER (XL) Tablet",
+      "ndc": "45963-0142-05",
+      "lotNumber": "305001",
+      "expirationDate": "2025-11-01",
+      "quantity": 1,
+      "creditAmount": 210.33,
+      "pricePerUnit": 210.33
+    },
+    {
+      "manufacturer": "WESTMINSTER PHARMA",
+      "productDescription": "Eplerenone 25mg Tablets",
+      "ndc": "69367-0307-30",
+      "lotNumber": "L230297",
+      "expirationDate": "2026-02-01",
+      "quantity": 1,
+      "creditAmount": 8.77,
+      "pricePerUnit": 8.77
+    },
+    {
+      "manufacturer": "WESTMINSTER PHARMA",
+      "productDescription": "Zoledronic Acid 4mg/5ml Injection",
+      "ndc": "69367-0190-50",
+      "lotNumber": "24051",
+      "expirationDate": "2025-10-01",
+      "quantity": 2,
+      "creditAmount": 756.36,
+      "pricePerUnit": 378.18
+    }
+  ],
+  "totalCreditAmount": 3049.61,
+  "totalItems": 8
+}
+  ✅ Chunk 4: 8 items
+  📦 Chunk 2 JSON Response: {
+  "reverseDistributor": "Return Solutions, Inc.",
+  "reverseDistributorInfo": {
+    "name": "Return Solutions, Inc.",
+    "contactEmail": null,
+    "contactPhone": "800-579-4804",
+    "address": {
+      "street": "10635 Dutchtown Road",
+      "city": "Knoxville",
+      "state": "TN",
+      "zipCode": "37932",
+      "country": "USA"
+    },
+    "portalUrl": null,
+    "supportedFormats": null
+  },
+  "pharmacy": "Boom Pharmacy",
+  "reportDate": "2025-09-23",
+  "creditReportNumber": "3R94Q",
+  "items": [
+    {
+      "manufacturer": "ACCORD HEALTHCARE",
+      "productDescription": "Quetiapine 400mg ER Tablet",
+      "ndc": "16729-0097-12",
+      "quantity": 1,
+      "creditAmount": 4.62,
+      "pricePerUnit": 4.62,
+      "expirationDate": "2024-09-24",
+      "lotNumber": "M2114938"
+    },
+    {
+      "manufacturer": "AJANTA PHARMA",
+      "productDescription": "Varenicline .5mg Tablets",
+      "ndc": "27241-0173-56",
+      "quantity": 1,
+      "creditAmount": 26.26,
+      "pricePerUnit": 26.26,
+      "expirationDate": "2025-11-25",
+      "lotNumber": "PA1684321"
+    },
+    {
+      "manufacturer": "AMNEAL PHARMA",
+      "productDescription": "Atropine Sulfate 1% Ophthalmic Solution",
+      "ndc": "60219-1748-02",
+      "quantity": 1,
+      "creditAmount": 8.57,
+      "pricePerUnit": 8.57,
+      "expirationDate": "2024-11-24",
+      "lotNumber": "AP230338"
+    },
+    {
+      "manufacturer": "AMNEAL PHARMA",
+      "productDescription": "Ursodiol 300mg Capsule",
+      "ndc": "69238-1540-01",
+      "quantity": 1,
+      "creditAmount": 75.6,
+      "pricePerUnit": 75.6,
+      "expirationDate": "2025-12-25",
+      "lotNumber": "AM240042"
+    },
+    {
+      "manufacturer": "ASCEND LABS",
+      "productDescription": "Aripiprazole 30mg Tablet",
+      "ndc": "67877-0435-03",
+      "quantity": 1,
+      "creditAmount": 136.37,
+      "pricePerUnit": 136.37,
+      "expirationDate": "2025-10-25",
+      "lotNumber": "22145015"
+    },
+    {
+      "manufacturer": "AUROBINDO PHARMA",
+      "productDescription": "Ritonavir 100mg Tablet",
+      "ndc": "65862-0687-30",
+      "quantity": 1,
+      "creditAmount": 7.64,
+      "pricePerUnit": 7.64,
+      "expirationDate": "2025-07-25",
+      "lotNumber": "TJSA23010A"
+    },
+    {
+      "manufacturer": "AVET PHARMA",
+      "productDescription": "Lisinopril 30mg Tablets",
+      "ndc": "23155-0880-01",
+      "quantity": 1,
+      "creditAmount": 1.4,
+      "pricePerUnit": 1.4,
+      "expirationDate": "2025-10-25",
+      "lotNumber": "03923006A"
+    },
+    {
+      "manufacturer": "AVET PHARMA",
+      "productDescription": "Lisinopril 30mg Tablets",
+      "ndc": "23155-0880-01",
+      "quantity": 1,
+      "creditAmount": 7,
+      "pricePerUnit": 7,
+      "expirationDate": "2025-10-25",
+      "lotNumber": "03923006A"
+    },
+    {
+      "manufacturer": "CAMBER PHARMA",
+      "productDescription": "Sildenafil 20mg Tablet",
+      "ndc": "31722-0776-05",
+      "quantity": 1,
+      "creditAmount": 28.5,
+      "pricePerUnit": 28.5,
+      "expirationDate": "2025-09-25",
+      "lotNumber": "SID23074"
+    },
+    {
+      "manufacturer": "ENCUBE ETHICALS",
+      "productDescription": "Clobetasol 0.05% Ointment",
+      "ndc": "21922-0017-06",
+      "quantity": 1,
+      "creditAmount": 172.82,
+      "pricePerUnit": 172.82,
+      "expirationDate": "2025-11-25",
+      "lotNumber": "3BL99"
+    },
+    {
+      "manufacturer": "GLENMARK PHARMA",
+      "productDescription": "Brim Tart//Tim Mal Opht .2%/.5% Solution",
+      "ndc": "68462-0281-69",
+      "quantity": 1,
+      "creditAmount": 5.32,
+      "pricePerUnit": 5.32,
+      "expirationDate": "2025-09-25",
+      "lotNumber": "24002"
+    },
+    {
+      "manufacturer": "GLENMARK PHARMA",
+      "productDescription": "Bisoprolol Fumarate/HCTZ 5mg/6.25mg Tablet",
+      "ndc": "68462-0879-05",
+      "quantity": 1,
+      "creditAmount": 166.28,
+      "pricePerUnit": 166.28,
+      "expirationDate": "2026-01-26",
+      "lotNumber": "17240212"
+    },
+    {
+      "manufacturer": "LAURUS LABS",
+      "productDescription": "Metformin HCL ER 750mg Tablets",
+      "ndc": "42385-0978-01",
+      "quantity": 1,
+      "creditAmount": 60.16,
+      "pricePerUnit": 60.16,
+      "expirationDate": "2025-10-25",
+      "lotNumber": "23214211"
+    },
+    {
+      "manufacturer": "LEADING PHARMA",
+      "productDescription": "Fenofibric Acid DR 135mg Capsule",
+      "ndc": "69315-0282-09",
+      "quantity": 1,
+      "creditAmount": 23.17,
+      "pricePerUnit": 23.17,
+      "expirationDate": "2024-12-24",
+      "lotNumber": "FAB223003C"
+    },
+    {
+      "manufacturer": "LIFESTAR PHARMA",
+      "productDescription": "Atorvastatin Calcium 10mg Tablets",
+      "ndc": "70756-0247-51",
+      "quantity": 1,
+      "creditAmount": 2.43,
+      "pricePerUnit": 2.43,
+      "expirationDate": "2026-01-26",
+      "lotNumber": "7JX002"
+    },
+    {
+      "manufacturer": "LIFESTAR PHARMA",
+      "productDescription": "Atorvastatin Calcium 10mg Tablets",
+      "ndc": "70756-0247-51",
+      "quantity": 1,
+      "creditAmount": 4.87,
+      "pricePerUnit": 4.87,
+      "expirationDate": "2026-01-26",
+      "lotNumber": "7JX002"
+    },
+    {
+      "manufacturer": "MACLEODS PHARMA U.S.A.",
+      "productDescription": "Candesartan 8mg Tablet",
+      "ndc": "33342-0115-07",
+      "quantity": 1,
+      "creditAmount": 155.58,
+      "pricePerUnit": 155.58,
+      "expirationDate": "2025-10-25",
+      "lotNumber": "RCJ2316A"
+    },
+    {
+      "manufacturer": "MACLEODS PHARMA U.S.A.",
+      "productDescription": "Aripiprazole 15mg Tablet",
+      "ndc": "33342-0125-07",
+      "quantity": 1,
+      "creditAmount": 5.39,
+      "pricePerUnit": 5.39,
+      "expirationDate": "2025-09-25",
+      "lotNumber": "BAC42102B"
+    },
+    {
+      "manufacturer": "MYLAN",
+      "productDescription": "Bepotastine Besilate 1.5% Ophthalmic Solution",
+      "ndc": "00378-7055-67",
+      "quantity": 1,
+      "creditAmount": 79.98,
+      "pricePerUnit": 79.98,
+      "expirationDate": "2025-06-25",
+      "lotNumber": "BFHH0006"
+    },
+    {
+      "manufacturer": "NORDIC PHARMA (Amring)",
+      "productDescription": "Mesalamine 1000mg Rectal Supp",
+      "ndc": "69918-0560-30",
+      "quantity": 1,
+      "creditAmount": 37.07,
+      "pricePerUnit": 37.07,
+      "expirationDate": "2025-01-25",
+      "lotNumber": "221661A"
+    }
+  ],
+  "totalCreditAmount": 3049.61,
+  "totalItems": 21
+}
+  ✅ Chunk 2: 20 items
+  📦 Chunk 3 JSON Response: {
+  "reverseDistributor": "Return Solutions, Inc.",
+  "reverseDistributorInfo": {
+    "name": "Return Solutions, Inc.",
+    "contactEmail": null,
+    "contactPhone": "800-579-4804",
+    "address": {
+      "street": "10635 Dutchtown Road",
+      "city": "Knoxville",
+      "state": "TN",
+      "zipCode": "37932",
+      "country": "USA"
+    },
+    "portalUrl": null,
+    "supportedFormats": null
+  },
+  "pharmacy": "Boom Pharmacy",
+  "reportDate": "2025-09-23",
+  "creditReportNumber": "3R94Q",
+  "items": [
+    {
+      "manufacturer": "GLENMARK PHARMA",
+      "productDescription": "Brim Tart//Tim Mal Opht .2%/.5% Solution",
+      "ndc": "68462-0281-69",
+      "quantity": 51,
+      "creditAmount": 5.32,
+      "pricePerUnit": 0.10431372549019607,
+      "expirationDate": "2025-09-20"
+    },
+    {
+      "manufacturer": "GLENMARK PHARMA",
+      "productDescription": "Bisoprolol Fumarate/HCTZ 5mg/6.25mg Tablet",
+      "ndc": "68462-0879-05",
+      "quantity": 5001,
+      "creditAmount": 166.28,
+      "pricePerUnit": 0.03326334733053389,
+      "expirationDate": "2026-01-20"
+    },
+    {
+      "manufacturer": "LAURUS LABS",
+      "productDescription": "Metformin HCL ER 750mg Tablets",
+      "ndc": "42385-0978-01",
+      "quantity": 110,
+      "creditAmount": 60.16,
+      "pricePerUnit": 0.5469090909090909,
+      "expirationDate": "2025-10-23"
+    },
+    {
+      "manufacturer": "LEADING PHARMA",
+      "productDescription": "Fenofibric Acid DR 135mg Capsule",
+      "ndc": "69315-0282-09",
+      "quantity": 12,
+      "creditAmount": 23.17,
+      "pricePerUnit": 1.9308333333333332,
+      "expirationDate": "2024-12-09"
+    },
+    {
+      "manufacturer": "LIFESTAR PHARMA",
+      "productDescription": "Atorvastatin Calcium 10mg Tablets",
+      "ndc": "70756-0247-51",
+      "quantity": 26,
+      "creditAmount": 2.43,
+      "pricePerUnit": 0.09346153846153846,
+      "expirationDate": "2026-01-07"
+    },
+    {
+      "manufacturer": "LIFESTAR PHARMA",
+      "productDescription": "Atorvastatin Calcium 10mg Tablets",
+      "ndc": "70756-0247-51",
+      "quantity": 26,
+      "creditAmount": 4.87,
+      "pricePerUnit": 0.1873076923076923,
+      "expirationDate": "2026-01-07"
+    },
+    {
+      "manufacturer": "MACLEODS PHARMA U.S.A.",
+      "productDescription": "Candesartan 8mg Tablet",
+      "ndc": "33342-0115-07",
+      "quantity": 10,
+      "creditAmount": 155.58,
+      "pricePerUnit": 15.558,
+      "expirationDate": "2025-10-12"
+    },
+    {
+      "manufacturer": "MACLEODS PHARMA U.S.A.",
+      "productDescription": "Aripiprazole 15mg Tablet",
+      "ndc": "33342-0125-07",
+      "quantity": 9,
+      "creditAmount": 5.39,
+      "pricePerUnit": 0.5988888888888889,
+      "expirationDate": "2025-09-12"
+    },
+    {
+      "manufacturer": "MYLAN",
+      "productDescription": "Bepotastine Besilate 1.5% Ophthalmic Solution",
+      "ndc": "00378-7055-67",
+      "quantity": 6,
+      "creditAmount": 79.98,
+      "pricePerUnit": 13.33,
+      "expirationDate": "2025-06-10"
+    },
+    {
+      "manufacturer": "NORDIC PHARMA (Amring)",
+      "productDescription": "Mesalamine 1000mg Rectal Supp",
+      "ndc": "69918-0560-30",
+      "quantity": 25,
+      "creditAmount": 37.07,
+      "pricePerUnit": 1.4828,
+      "expirationDate": "2025-01-03"
+    },
+    {
+      "manufacturer": "NOVADOZ",
+      "productDescription": "Rosuvastatin 10mg Tablet",
+      "ndc": "72205-0003-99",
+      "quantity": 100,
+      "creditAmount": 32.06,
+      "pricePerUnit": 0.3206,
+      "expirationDate": "2026-01-01"
+    },
+    {
+      "manufacturer": "NOVADOZ",
+      "productDescription": "Rosuvastatin 5mg Tablet",
+      "ndc": "72205-0027-99",
+      "quantity": 100,
+      "creditAmount": 105.84,
+      "pricePerUnit": 1.0584,
+      "expirationDate": "2026-01-01"
+    },
+    {
+      "manufacturer": "PAR PHARMA",
+      "productDescription": "Ibuprofen/Famotidine 800mg/26.6mg Tablets",
+      "ndc": "49884-0366-09",
+      "quantity": 90,
+      "creditAmount": 82.49,
+      "pricePerUnit": 0.9165555555555556,
+      "expirationDate": "2026-01-09"
+    },
+    {
+      "manufacturer": "PFIZER",
+      "productDescription": "Eucrisa 2% Topical Ointment",
+      "ndc": "55724-0211-21",
+      "quantity": 25,
+      "creditAmount": 714.07,
+      "pricePerUnit": 28.5628,
+      "expirationDate": "2025-01-06"
+    },
+    {
+      "manufacturer": "RISING PHARMA (Credited by RSI upon receipt of credit from manufacturer)",
+      "productDescription": "Amitriptyline Hcl 100mg Tablets",
+      "ndc": "16571-0109-01",
+      "quantity": 100,
+      "creditAmount": 7.16,
+      "pricePerUnit": 0.0716,
+      "expirationDate": "2025-05-10"
+    },
+    {
+      "manufacturer": "RISING PHARMA (Credited by RSI upon receipt of credit from manufacturer)",
+      "productDescription": "Amitriptyline Hcl 100mg Tablets",
+      "ndc": "16571-0109-01",
+      "quantity": 100,
+      "creditAmount": 7.16,
+      "pricePerUnit": 0.0716,
+      "expirationDate": "2025-05-10"
+    },
+    {
+      "manufacturer": "RISING PHARMA (Credited by RSI upon receipt of credit from manufacturer)",
+      "productDescription": "Amitriptyline Hcl 100mg Tablets",
+      "ndc": "16571-0109-01",
+      "quantity": 100,
+      "creditAmount": 7.16,
+      "pricePerUnit": 0.0716,
+      "expirationDate": "2025-05-10"
+    },
+    {
+      "manufacturer": "STRIDES PHARMA",
+      "productDescription": "Prednisone 20mg Tablet",
+      "ndc": "64380-0785-07",
+      "quantity": 10,
+      "creditAmount": 26.96,
+      "pricePerUnit": 2.696,
+      "expirationDate": "2024-09-05"
+    },
+    {
+      "manufacturer": "SUN PHARMA",
+      "productDescription": "Lurasidone Hcl 80mg Tablets",
+      "ndc": "47335-0685-83",
+      "quantity": 24,
+      "creditAmount": 40.82,
+      "pricePerUnit": 1.7008333333333334,
+      "expirationDate": "2025-11-24"
+    },
+    {
+      "manufacturer": "SUN PHARMA (Credited by RSI upon receipt of credit from manufacturer)",
+      "productDescription": "Desonide 0.05% Topical Lotion",
+      "ndc": "51672-4079-08",
+      "quantity": 9,
+      "creditAmount": 7.26,
+      "pricePerUnit": 0.8066666666666666,
+      "expirationDate": "2024-09-09"
+    },
+    {
+      "manufacturer": "TEVA - GENERIC",
+      "productDescription": "Calcitriol 0.25mcg Capsule",
+      "ndc": "00093-7352-01",
+      "quantity": 10,
+      "creditAmount": 34.14,
+      "pricePerUnit": 3.414,
+      "expirationDate": "2025-01-30"
+    },
+    {
+      "manufacturer": "TEVA - GENERIC",
+      "productDescription": "Bupropion 300mg ER (XL) Tablet",
+      "ndc": "45963-0142-05",
+      "quantity": 50,
+      "creditAmount": 210.33,
+      "pricePerUnit": 4.2066,
+      "expirationDate": "2025-11-30"
+    },
+    {
+      "manufacturer": "WESTMINSTER PHARMA",
+      "productDescription": "Eplerenone 25mg Tablets",
+      "ndc": "69367-0307-30",
+      "quantity": 30,
+      "creditAmount": 8.77,
+      "pricePerUnit": 0.29233333333333333,
+      "expirationDate": "2026-02-03"
+    },
+    {
+      "manufacturer": "WESTMINSTER PHARMA (Credited by RSI upon receipt of credit from manufacturer)",
+      "productDescription": "Zoledronic Acid 4mg/5ml Injection",
+      "ndc": "69367-0190-50",
+      "quantity": 10,
+      "creditAmount": 378.18,
+      "pricePerUnit": 37.818,
+      "expirationDate": "2025-10-24"
+    }
+  ],
+  "totalCreditAmount": null,
+  "totalItems": 25
+}
+  ✅ Chunk 3: 24 items
+🔀 Programmatically merging 5 chunks...
+  📦 Chunk 1: Adding 3 items to merge pool
+  📦 Chunk 2: Adding 20 items to merge pool
+  📦 Chunk 3: Adding 24 items to merge pool
+  📦 Chunk 4: Adding 8 items to merge pool
+  📦 Chunk 5: Adding 3 items to merge pool
+📊 Merge statistics: 58 total items collected from all chunks
+  ⚠️  Item with same NDC/Lot/Exp but different qty/credit - treating as separate: NO_NDC
+  ⚠️  Item with same NDC/Lot/Exp but different qty/credit - treating as separate: NO_NDC
+  ⚠️  Item with same NDC/Lot/Exp but different qty/credit - treating as separate: NO_NDC
+  ⚠️  Item with same NDC/Lot/Exp but different qty/credit - treating as separate: NO_NDC
+  ⚠️  Item with same NDC/Lot/Exp but different qty/credit - treating as separate: NO_NDC
+🔄 Removed 2 duplicate items (from chunk overlap)
+   📊 Items after deduplication: 56 (from 58 after filter)
+✅ Merge complete:
+   📊 Items: 58 collected → 58 after filter → 56 after deduplication
+   💰 Total credit: $5120.45
+   📋 Final item count: 56
+✅ Using real extracted data (no faking)
+🔍 Looking for reverse distributor: Return Solutions, Inc.
+📦 Distributor Info to Save:
+   Name: Return Solutions, Inc.
+   Email: Not provided
+   Phone: 800-579-4804
+   Address: {"street":"10635 Dutchtown Road","city":"Knoxville","state":"TN","zipCode":"37932","country":"USA"}
+   Portal URL: www.drugreturns.com
+   Supported Formats: Not provided
+✅ Found existing reverse distributor: 2da2ca2e-c3c9-4ffa-9a06-a226631a9b4f Return Solutions, Inc.
+   📞 Will update phone: 800-579-4804
+   📍 Will update address: {"city":"Knoxville","state":"TN","street":"10635 Dutchtown Road","country":"USA","zipCode":"37932"}
+   🌐 Will update portal URL: www.drugreturns.com
+💾 Updating existing distributor with fields: [ 'contact_phone', 'address', 'portal_url' ]
+✅ Successfully updated reverse distributor with new information
+✅ Reverse distributor ID: 2da2ca2e-c3c9-4ffa-9a06-a226631a9b4f
+✅ File uploaded to Supabase Storage: https://mxdzmfgkjktbvjeonwiq.supabase.co/storage/v1/object/public/documents/3e19f01d-511d-421f-9cc6-ed83d33e034d/1764944533496-returnreports-9_23_25.pdf
+✅ Document saved with distributor ID: 2da2ca2e-c3c9-4ffa-9a06-a226631a9b4f and report date: 2025-09-23
+⚠️  NDC validation is DISABLED - accepting all items without validation
+
+✅ 56 items will be inserted (NDC validation skipped)
+✅ Return report data saved: 56 items stored as separate records

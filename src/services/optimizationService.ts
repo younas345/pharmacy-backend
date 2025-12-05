@@ -133,10 +133,21 @@ export const getOptimizationRecommendations = async (
   }
 
   // Step 3: Search return_reports for matching NDCs
-  // Get distributor name directly from return_reports data
+  // Join with uploaded_documents and reverse_distributors to get distributor name
   const { data: returnReports, error: reportsError } = await db
     .from('return_reports')
-    .select('id, data');
+    .select(`
+      id,
+      data,
+      document_id,
+      uploaded_documents (
+        reverse_distributor_id,
+        reverse_distributors (
+          id,
+          name
+        )
+      )
+    `);
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
@@ -157,7 +168,11 @@ export const getOptimizationRecommendations = async (
   // Debug: Check what distributors we have in the data
   const allDistributors = new Set<string>();
   (returnReports || []).forEach((report: any) => {
-    const distributorName = report.data?.reverseDistributor || 'Unknown Distributor';
+    // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
+    const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
+                           report.data?.reverseDistributor || 
+                           report.data?.reverseDistributorInfo?.name ||
+                           'Unknown Distributor';
     if (distributorName && distributorName !== 'Unknown Distributor') {
       allDistributors.add(distributorName);
     }
@@ -188,8 +203,11 @@ export const getOptimizationRecommendations = async (
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
     
-    // Get distributor name directly from the data field
-    const distributorName = data?.reverseDistributor || 'Unknown Distributor';
+    // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
+    const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
+                           data?.reverseDistributor || 
+                           data?.reverseDistributorInfo?.name ||
+                           'Unknown Distributor';
     
     // Debug: Log distributor extraction
     console.log(`🔍 Report ${report.id}: distributor = "${distributorName}"`);
@@ -911,9 +929,21 @@ export const getPackageRecommendations = async (
   const ndcs = [...new Set(productItems.map((item) => item.ndc))];
 
   // Step 3: Get pricing data from return_reports
+  // Join with uploaded_documents and reverse_distributors to get distributor name
   const { data: returnReports, error: reportsError } = await db
     .from('return_reports')
-    .select('id, data');
+    .select(`
+      id,
+      data,
+      document_id,
+      uploaded_documents (
+        reverse_distributor_id,
+        reverse_distributors (
+          id,
+          name
+        )
+      )
+    `);
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
@@ -938,7 +968,11 @@ export const getPackageRecommendations = async (
   // Process return reports to extract pricing
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
-    const distributorName = data?.reverseDistributor || 'Unknown Distributor';
+    // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
+    const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
+                           data?.reverseDistributor || 
+                           data?.reverseDistributorInfo?.name ||
+                           'Unknown Distributor';
 
     if (!distributorName || distributorName === 'Unknown Distributor') {
       return;
@@ -1229,9 +1263,21 @@ export const getPackageRecommendationsByNdcs = async (
   }
 
   // Step 3: Get pricing data from return_reports
+  // Join with uploaded_documents and reverse_distributors to get distributor name
   const { data: returnReports, error: reportsError } = await db
     .from('return_reports')
-    .select('id, data');
+    .select(`
+      id,
+      data,
+      document_id,
+      uploaded_documents (
+        reverse_distributor_id,
+        reverse_distributors (
+          id,
+          name
+        )
+      )
+    `);
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
@@ -1256,7 +1302,11 @@ export const getPackageRecommendationsByNdcs = async (
   // Process return reports to extract pricing
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
-    const distributorName = data?.reverseDistributor || 'Unknown Distributor';
+    // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
+    const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
+                           data?.reverseDistributor || 
+                           data?.reverseDistributorInfo?.name ||
+                           'Unknown Distributor';
 
     if (!distributorName || distributorName === 'Unknown Distributor') {
       return;
@@ -1637,9 +1687,21 @@ export const getDistributorSuggestionsByNdc = async (
   }
 
   // Step 3: Get pricing data from return_reports
+  // Join with uploaded_documents and reverse_distributors to get distributor name
   const { data: returnReports, error: reportsError } = await db
     .from('return_reports')
-    .select('id, data');
+    .select(`
+      id,
+      data,
+      document_id,
+      uploaded_documents (
+        reverse_distributor_id,
+        reverse_distributors (
+          id,
+          name
+        )
+      )
+    `);
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
@@ -1658,7 +1720,11 @@ export const getDistributorSuggestionsByNdc = async (
   // Process return reports to extract pricing for this NDC
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
-    const distributorName = data?.reverseDistributor || 'Unknown Distributor';
+    // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
+    const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
+                           data?.reverseDistributor || 
+                           data?.reverseDistributorInfo?.name ||
+                           'Unknown Distributor';
 
     if (!distributorName || distributorName === 'Unknown Distributor') {
       return;
@@ -1955,9 +2021,21 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
   }
 
   // Step 2: Get all return reports
+  // Join with uploaded_documents and reverse_distributors to get distributor name
   const { data: returnReports, error: reportsError } = await db
     .from('return_reports')
-    .select('id, data');
+    .select(`
+      id,
+      data,
+      document_id,
+      uploaded_documents!inner(
+        reverse_distributor_id,
+        reverse_distributors!inner(
+          id,
+          name
+        )
+      )
+    `);
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
@@ -1985,7 +2063,11 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
   // Process return reports to extract pricing for all NDCs
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
-    const distributorName = data?.reverseDistributor || 'Unknown Distributor';
+    // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
+    const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
+                           data?.reverseDistributor || 
+                           data?.reverseDistributorInfo?.name ||
+                           'Unknown Distributor';
 
     if (!distributorName || distributorName === 'Unknown Distributor') {
       return;
