@@ -49,32 +49,50 @@ export const findOrCreateReverseDistributor = async (
   const db = supabaseAdmin;
   const trimmedName = name.trim();
 
-  // Try to find existing distributor by name (case-insensitive)
-  const { data: existing } = await db
+  // Normalize name for matching (remove extra spaces, convert to lowercase for comparison)
+  const normalizedName = trimmedName.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  // Try to find existing distributor by name (case-insensitive, handle variations)
+  // First try exact match (case-insensitive)
+  let { data: existing } = await db
     .from('reverse_distributors')
     .select('*')
     .ilike('name', trimmedName)
     .limit(1)
-    .single();
+    .maybeSingle();
+
+  // If not found, try to find by normalized name (more flexible matching)
+  if (!existing) {
+    const { data: allDistributors } = await db
+      .from('reverse_distributors')
+      .select('*');
+    
+    if (allDistributors) {
+      existing = allDistributors.find(dist => {
+        const distNormalized = dist.name.toLowerCase().replace(/\s+/g, ' ').trim();
+        return distNormalized === normalizedName;
+      }) || null;
+    }
+  }
 
   if (existing) {
-    console.log('✅ Found existing reverse distributor:', existing.id, trimmedName);
+    console.log('✅ Found existing reverse distributor:', existing.id, existing.name);
     
-    // Update existing distributor with new information if provided
+    // Always update existing distributor with new information if provided
     if (distributorInfo) {
       const updateData: any = {};
       
-      // Only update fields that are provided and not already set (or if new info is more complete)
-      if (distributorInfo.contactEmail && (!existing.contact_email || existing.contact_email.trim() === '')) {
+      // Update fields if new information is provided (always update, not just when empty)
+      if (distributorInfo.contactEmail) {
         updateData.contact_email = distributorInfo.contactEmail;
         console.log('   📧 Will update email:', distributorInfo.contactEmail);
       }
-      if (distributorInfo.contactPhone && (!existing.contact_phone || existing.contact_phone.trim() === '')) {
+      if (distributorInfo.contactPhone) {
         updateData.contact_phone = distributorInfo.contactPhone;
         console.log('   📞 Will update phone:', distributorInfo.contactPhone);
       }
       if (distributorInfo.address) {
-        // Merge address data
+        // Merge address data (new info takes precedence)
         const existingAddress = existing.address || {};
         updateData.address = {
           ...existingAddress,
@@ -82,18 +100,18 @@ export const findOrCreateReverseDistributor = async (
         };
         console.log('   📍 Will update address:', JSON.stringify(updateData.address));
       }
-      if (distributorInfo.portalUrl && (!existing.portal_url || existing.portal_url.trim() === '')) {
+      if (distributorInfo.portalUrl) {
         updateData.portal_url = distributorInfo.portalUrl;
         console.log('   🌐 Will update portal URL:', distributorInfo.portalUrl);
       }
-      if (distributorInfo.supportedFormats && (!existing.supported_formats || existing.supported_formats.length === 0)) {
+      if (distributorInfo.supportedFormats) {
         updateData.supported_formats = distributorInfo.supportedFormats;
         console.log('   📄 Will update supported formats:', distributorInfo.supportedFormats);
       }
       
-      // Update if there's any new information
+      // Always update if there's any new information provided
       if (Object.keys(updateData).length > 0) {
-        console.log('💾 Updating distributor with fields:', Object.keys(updateData));
+        console.log('💾 Updating existing distributor with fields:', Object.keys(updateData));
         const { error: updateError } = await db
           .from('reverse_distributors')
           .update(updateData)
@@ -105,7 +123,7 @@ export const findOrCreateReverseDistributor = async (
           console.log('✅ Successfully updated reverse distributor with new information');
         }
       } else {
-        console.log('ℹ️ No new information to update (all fields already populated)');
+        console.log('ℹ️ No new information provided to update');
       }
     }
     
