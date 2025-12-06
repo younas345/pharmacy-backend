@@ -326,6 +326,12 @@ export const getOptimizationRecommendations = async (
         
         // Extract product name from return_reports data field (try various field names)
         // Priority: itemName (most common in return_reports.data) > productName > product_name > product > description > drugName > name
+        if (isSearchMode) {
+          console.log(`   🔍 Item object keys:`, Object.keys(item || {}));
+          console.log(`   🔍 item.itemName:`, item.itemName);
+          console.log(`   🔍 item.productName:`, item.productName);
+        }
+        
         const productName = item.itemName || item.productName || item.product_name || item.product || item.description || item.drugName || item.name;
         if (productName && !ndcToProductNameMap[originalNdcFormat]) {
           const fieldName = item.itemName ? 'itemName' : item.productName ? 'productName' : item.product_name ? 'product_name' : 'other';
@@ -333,9 +339,12 @@ export const getOptimizationRecommendations = async (
           console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}"`);
           console.log(`   📦 Product name from return_reports.data.${fieldName}: "${productName}"`);
         } else if (productName && ndcToProductNameMap[originalNdcFormat]) {
-          console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}" (product name already stored)`);
+          console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}" (product name already stored: "${ndcToProductNameMap[originalNdcFormat]}")`);
         } else {
-          console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}" (no product name in return_reports data)`);
+          console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}"`);
+          if (isSearchMode) {
+            console.log(`   ⚠️ No product name found. Item keys:`, Object.keys(item || {}));
+          }
         }
         
         // Initialize map entry for actual NDC if not exists
@@ -412,6 +421,7 @@ export const getOptimizationRecommendations = async (
   if (isSearchMode && Object.keys(searchTermToActualNdc).length > 0) {
     console.log(`\n=== MERGING PHARMACY PRODUCTS WITH RETURN REPORTS ===`);
     console.log(`searchTermToActualNdc map:`, searchTermToActualNdc);
+    console.log(`ndcToProductNameMap (from return_reports.data):`, ndcToProductNameMap);
     console.log(`productItems from pharmacy:`, productItems.map(p => ({ ndc: p.ndc, name: p.product_name })));
     
     // Create a map of actual NDCs to product info
@@ -433,12 +443,27 @@ export const getOptimizationRecommendations = async (
       if (actualNdc) {
         // Use actual NDC from return_reports, keep product info from pharmacy
         if (!actualNdcToProduct.has(actualNdc)) {
-          console.log(`  ✅ Adding actualNdc="${actualNdc}" with pharmacy product info`);
+          // Check if product_name is a default/generic name (starts with "Product")
+          const isDefaultName = item.product_name && (
+            item.product_name === `Product ${item.ndc}` || 
+            item.product_name === `Product ${actualNdc}` ||
+            item.product_name.startsWith('Product ')
+          );
+          
+          // If default name, try to get itemName from return_reports
+          let finalProductName = item.product_name;
+          if (isDefaultName && ndcToProductNameMap[actualNdc]) {
+            finalProductName = ndcToProductNameMap[actualNdc];
+            console.log(`  ✅ Using itemName from return_reports.data: "${finalProductName}" (replacing default name)`);
+          } else if (!isDefaultName) {
+            console.log(`  ✅ Using product name from pharmacy inventory: "${finalProductName}"`);
+          } else {
+            console.log(`  ⚠️ Using default product name: "${finalProductName}" (itemName not found in return_reports)`);
+          }
+          
           actualNdcToProduct.set(actualNdc, {
             id: item.id || '',
-            product_name: item.product_name === `Product ${item.ndc}` 
-              ? `Product ${actualNdc}` 
-              : item.product_name,
+            product_name: finalProductName,
             quantity: item.quantity,
             lot_number: item.lot_number,
             expiration_date: item.expiration_date,
@@ -455,6 +480,7 @@ export const getOptimizationRecommendations = async (
         
         // Try to get product name from return_reports.data first (from itemName field)
         let productName = ndcToProductNameMap[actualNdc];
+        console.log(`   🔍 Looking for product name in ndcToProductNameMap for "${actualNdc}":`, productName || 'NOT FOUND');
         
         // If not in return_reports, try to fetch from products table
         if (!productName) {
