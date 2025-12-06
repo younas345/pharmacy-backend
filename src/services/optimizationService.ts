@@ -82,18 +82,37 @@ export const getOptimizationRecommendations = async (
       (foundProducts || []).map(p => [String(p.ndc).replace(/-/g, '').trim(), p])
     );
     
+    console.log(`📋 Pharmacy has ${foundProducts?.length || 0} products in inventory`);
+    if (foundProducts && foundProducts.length > 0) {
+      console.log(`📋 Pharmacy product NDCs:`, foundProducts.map(p => p.ndc));
+    }
+    
     // Initialize product items with search terms (will be updated with actual matches later)
     productItems = searchTerms.map(searchTerm => {
-      // Try to find exact match first
+      // Try to find exact match first in pharmacy's inventory
       const found = productMap.get(searchTerm);
-      return found || {
-        id: '',
-        ndc: searchTerm,
-        product_name: `Product ${searchTerm}`, // Default name, will be updated if match found
-        quantity: 1, // Default quantity
-        lot_number: undefined,
-        expiration_date: undefined,
-      };
+      if (found) {
+        console.log(`✅ Found search term "${searchTerm}" in pharmacy inventory as "${found.ndc}"`);
+        // Return the product with its ORIGINAL NDC format from pharmacy inventory
+        return {
+          id: found.id,
+          ndc: found.ndc, // ✅ Use original NDC format from pharmacy
+          product_name: found.product_name,
+          quantity: found.quantity,
+          lot_number: found.lot_number,
+          expiration_date: found.expiration_date,
+        };
+      } else {
+        console.log(`⚠️ Search term "${searchTerm}" NOT found in pharmacy inventory`);
+        return {
+          id: '',
+          ndc: searchTerm, // Use normalized version as fallback
+          product_name: `Product ${searchTerm}`,
+          quantity: 1,
+          lot_number: undefined,
+          expiration_date: undefined,
+        };
+      }
     });
   } else {
     // Step 1: Get all product list items for this pharmacy
@@ -169,6 +188,10 @@ export const getOptimizationRecommendations = async (
 
   console.log(`📦 Found ${returnReports?.length || 0} return report records`);
   console.log(`🔍 Looking for NDCs:`, ndcs);
+  if (isSearchMode && searchNdcs) {
+    console.log(`🔍 Original search NDCs (from query param):`, searchNdcs);
+    console.log(`🔍 Normalized search NDCs (for matching):`, ndcs);
+  }
   
   // Debug: Check what distributors we have in the data
   const allDistributors = new Set<string>();
@@ -205,8 +228,18 @@ export const getOptimizationRecommendations = async (
 
   // Process return reports
   // Each return_reports record contains a single item in the data field
+  if (isSearchMode) {
+    console.log(`\n=== PROCESSING RETURN REPORTS FOR SEARCH MODE ===`);
+  }
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
+    
+    if (isSearchMode) {
+      console.log(`\n📄 Processing report ${report.id}`);
+      console.log(`   Data keys:`, data ? Object.keys(data) : 'null');
+      console.log(`   Data.ndcCode:`, data?.ndcCode);
+      console.log(`   Data.ndc:`, data?.ndc);
+    }
     
     // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
     const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
@@ -245,37 +278,49 @@ export const getOptimizationRecommendations = async (
       const ndcCode = item.ndcCode || item.ndc;
       
       if (!ndcCode) {
+        if (isSearchMode) {
+          console.log(`⚠️ No NDC found in item. Item keys:`, Object.keys(item || {}));
+        }
         return;
       }
 
       // Normalize NDC for comparison (remove dashes and convert to string)
       const normalizedNdcCode = String(ndcCode).replace(/-/g, '').trim();
       
+      // Debug logging for search mode
+      if (isSearchMode) {
+        console.log(`🔍 Checking NDC: "${ndcCode}" (normalized: "${normalizedNdcCode}") against search terms:`, ndcs);
+      }
+      
       // Find matching NDC from product list or search terms
       let matchingNdc: string | undefined;
       let actualNdcKey: string; // The key to use in ndcPricingMap
       
       if (isSearchMode) {
-        // Partial match mode: check if search term is contained in NDC or vice versa
+        // Exact match mode: check if normalized NDC exactly matches any search term
+        // In search mode, ndcs array already contains normalized search terms (from line 71)
         const matchedSearchTerm = ndcs.find(searchTerm => {
+          // searchTerm is already normalized (no dashes) from line 67-71
           const normalizedSearchTerm = String(searchTerm).replace(/-/g, '').trim();
-          // Check if search term matches the beginning of NDC (LIKE logic)
-          // e.g., "42385" should match "42385097801"
-          return normalizedNdcCode.startsWith(normalizedSearchTerm) || 
-                 normalizedSearchTerm.startsWith(normalizedNdcCode) ||
-                 normalizedNdcCode === normalizedSearchTerm;
+          // Use exact match for better accuracy when user provides specific NDC
+          return normalizedNdcCode === normalizedSearchTerm;
         });
         
         if (!matchedSearchTerm) {
+          if (isSearchMode) {
+            console.log(`❌ NDC "${ndcCode}" (normalized: "${normalizedNdcCode}") did not match any search term`);
+          }
           return;
         }
         
-        // Use the actual NDC from return_reports as the key (not the search term)
-        actualNdcKey = normalizedNdcCode;
+        // Use the ORIGINAL NDC format from return_reports (preserve dashes)
+        const originalNdcFormat = String(ndcCode).trim();
+        actualNdcKey = originalNdcFormat;
         matchingNdc = matchedSearchTerm;
         
-        // Track which search term matched this actual NDC
-        searchTermToActualNdc[matchedSearchTerm] = normalizedNdcCode;
+        // Track which search term matched which actual NDC (store original format with dashes)
+        searchTermToActualNdc[matchedSearchTerm] = originalNdcFormat;
+        console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}" (preserving original format)`);
         
         // Initialize map entry for actual NDC if not exists
         if (!ndcPricingMap[actualNdcKey]) {
@@ -349,6 +394,10 @@ export const getOptimizationRecommendations = async (
 
   // In search mode, update productItems to use actual matched NDCs
   if (isSearchMode && Object.keys(searchTermToActualNdc).length > 0) {
+    console.log(`\n=== MERGING PHARMACY PRODUCTS WITH RETURN REPORTS ===`);
+    console.log(`searchTermToActualNdc map:`, searchTermToActualNdc);
+    console.log(`productItems from pharmacy:`, productItems.map(p => ({ ndc: p.ndc, name: p.product_name })));
+    
     // Create a map of actual NDCs to product info
     const actualNdcToProduct: Map<string, { 
       id: string; 
@@ -359,10 +408,16 @@ export const getOptimizationRecommendations = async (
     }> = new Map();
     
     productItems.forEach(item => {
-      const actualNdc = searchTermToActualNdc[item.ndc];
+      // Normalize item.ndc to match against searchTermToActualNdc keys
+      const normalizedItemNdc = String(item.ndc).replace(/-/g, '').trim();
+      const actualNdc = searchTermToActualNdc[normalizedItemNdc];
+      
+      console.log(`  Checking item.ndc="${item.ndc}" (normalized="${normalizedItemNdc}") → actualNdc="${actualNdc || 'NOT FOUND'}"`);
+      
       if (actualNdc) {
-        // Use actual NDC, keep product info
+        // Use actual NDC from return_reports, keep product info from pharmacy
         if (!actualNdcToProduct.has(actualNdc)) {
+          console.log(`  ✅ Adding actualNdc="${actualNdc}" with pharmacy product info`);
           actualNdcToProduct.set(actualNdc, {
             id: item.id || '',
             product_name: item.product_name === `Product ${item.ndc}` 
@@ -376,6 +431,21 @@ export const getOptimizationRecommendations = async (
       }
     });
     
+    // Add any matched NDCs from searchTermToActualNdc that weren't in productItems
+    // This handles the case where the NDC was found in return_reports but not in pharmacy's inventory
+    Object.entries(searchTermToActualNdc).forEach(([searchTerm, actualNdc]) => {
+      if (!actualNdcToProduct.has(actualNdc)) {
+        console.log(`✨ Adding matched NDC ${actualNdc} from return_reports (not in pharmacy inventory)`);
+        actualNdcToProduct.set(actualNdc, {
+          id: '',
+          product_name: `Product ${actualNdc}`,
+          quantity: 1, // Default quantity for searched items
+          lot_number: undefined,
+          expiration_date: undefined,
+        });
+      }
+    });
+    
     // Update productItems with actual NDCs
     productItems = Array.from(actualNdcToProduct.entries()).map(([ndc, info]) => ({
       id: info.id,
@@ -385,6 +455,9 @@ export const getOptimizationRecommendations = async (
       lot_number: info.lot_number,
       expiration_date: info.expiration_date,
     }));
+    
+    console.log(`📦 Final productItems (${productItems.length} items):`, productItems.map(p => ({ ndc: p.ndc, name: p.product_name, qty: p.quantity })));
+    console.log(`=== END MERGING ===\n`);
     
     // Update ndcs array with actual matched NDCs
     ndcs = [...new Set(Array.from(actualNdcToProduct.keys()))];
@@ -852,6 +925,121 @@ export const getOptimizationRecommendations = async (
   });
 
   const potentialAdditionalEarnings = Math.max(0, multipleDistributorsStrategy - singleDistributorStrategy);
+
+  // Filter recommendations by search NDCs if in search mode
+  let filteredRecommendations = recommendations;
+  if (isSearchMode && searchNdcs && searchNdcs.length > 0) {
+    console.log(`\n=== FILTERING RECOMMENDATIONS ===`);
+    console.log(`Total recommendations before filter:`, recommendations.length);
+    console.log(`Recommendations NDCs:`, recommendations.map(r => r.ndc));
+    
+    // Normalize search NDCs for comparison (remove dashes)
+    const normalizedSearchNdcs = searchNdcs.map(n => String(n).replace(/-/g, '').trim().toLowerCase());
+    console.log(`Original search NDCs (from user):`, searchNdcs);
+    console.log(`Normalized search NDCs (for filter):`, normalizedSearchNdcs);
+    
+    // Filter recommendations to only include those matching the search NDCs
+    // Use exact matching after normalization to ensure we only return the specific NDCs requested
+    filteredRecommendations = recommendations.filter(rec => {
+      const normalizedRecNdc = String(rec.ndc).replace(/-/g, '').trim().toLowerCase();
+      const matches = normalizedSearchNdcs.some(searchNdc => 
+        normalizedRecNdc === searchNdc
+      );
+      console.log(`Checking rec.ndc="${rec.ndc}" (normalized="${normalizedRecNdc}") → ${matches ? '✅ MATCH' : '❌ NO MATCH'}`);
+      return matches;
+    });
+    
+    console.log(`Total recommendations after filter:`, filteredRecommendations.length);
+    console.log(`=== END FILTERING ===\n`);
+    
+    // Recalculate totalPotentialSavings based on filtered recommendations
+    const filteredTotalPotentialSavings = filteredRecommendations.reduce((sum, rec) => sum + rec.savings, 0);
+    
+    // Recalculate earnings comparison based on filtered recommendations
+    const filteredAllDistributorNames = new Set<string>();
+    filteredRecommendations.forEach((rec) => {
+      filteredAllDistributorNames.add(rec.recommendedDistributor);
+      rec.alternativeDistributors.forEach((alt) => {
+        filteredAllDistributorNames.add(alt.name);
+      });
+    });
+
+    const filteredDistributorTotalEarnings: Record<string, number> = {};
+    
+    for (const distributorName of filteredAllDistributorNames) {
+      let totalEarnings = 0;
+      
+      filteredRecommendations.forEach((rec) => {
+        let price: number | null = null;
+        
+        if (rec.recommendedDistributor === distributorName) {
+          price = rec.expectedPrice;
+        } else {
+          const altDist = rec.alternativeDistributors.find(alt => alt.name === distributorName);
+          if (altDist) {
+            price = altDist.price;
+          }
+        }
+        
+        const finalPrice = price !== null ? price : rec.worstPrice;
+        totalEarnings += finalPrice * rec.quantity;
+      });
+      
+      filteredDistributorTotalEarnings[distributorName] = totalEarnings;
+    }
+
+    const filteredBestSingleDistributor = Object.entries(filteredDistributorTotalEarnings)
+      .sort((a, b) => b[1] - a[1])[0];
+    
+    const filteredSingleDistributorStrategy = filteredBestSingleDistributor ? filteredBestSingleDistributor[1] : 0;
+
+    let filteredMultipleDistributorsStrategy = 0;
+
+    filteredRecommendations.forEach((rec) => {
+      const allOptions = [
+        { 
+          name: rec.recommendedDistributor, 
+          price: rec.expectedPrice, 
+          stillAvailableThisMonth: distributorNameToStillAvailableMap[rec.recommendedDistributor] ?? false 
+        },
+        ...rec.alternativeDistributors.map((alt) => ({
+          name: alt.name,
+          price: alt.price,
+          stillAvailableThisMonth: distributorNameToStillAvailableMap[alt.name] ?? false,
+        })),
+      ];
+
+      const availableThisMonthOptions = allOptions
+        .sort((a, b) => b.price - a.price);
+
+      if (availableThisMonthOptions.length > 0) {
+        const bestAvailable = availableThisMonthOptions[0];
+        const earnings = bestAvailable.price * rec.quantity;
+        filteredMultipleDistributorsStrategy += earnings;
+      } else {
+        const earnings = rec.expectedPrice * rec.quantity;
+        filteredMultipleDistributorsStrategy += earnings;
+      }
+    });
+
+    const filteredPotentialAdditionalEarnings = Math.max(0, filteredMultipleDistributorsStrategy - filteredSingleDistributorStrategy);
+
+    return {
+      recommendations: filteredRecommendations,
+      totalPotentialSavings: filteredTotalPotentialSavings,
+      generatedAt: new Date().toISOString(),
+      distributorUsage: {
+        usedThisMonth,
+        totalDistributors,
+        stillAvailable,
+      },
+      earningsComparison: {
+        singleDistributorStrategy: Math.round(filteredSingleDistributorStrategy * 100) / 100,
+        multipleDistributorsStrategy: Math.round(filteredMultipleDistributorsStrategy * 100) / 100,
+        potentialAdditionalEarnings: Math.round(filteredPotentialAdditionalEarnings * 100) / 100,
+      },
+    };
+  }
 
   return {
     recommendations,
