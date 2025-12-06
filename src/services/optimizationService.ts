@@ -2,9 +2,12 @@ import { supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
 
 export interface OptimizationRecommendation {
+  id?: string;
   ndc: string;
   productName: string;
   quantity: number;
+  lotNumber?: string;
+  expirationDate?: string;
   recommendedDistributor: string;
   recommendedDistributorContact?: {
     email?: string;
@@ -55,7 +58,7 @@ export const getOptimizationRecommendations = async (
   const db = supabaseAdmin;
 
   let ndcs: string[] = [];
-  let productItems: Array<{ id: string; ndc: string; product_name: string; quantity: number }> = [];
+  let productItems: Array<{ id: string; ndc: string; product_name: string; quantity: number; lot_number?: string; expiration_date?: string }> = [];
   const isSearchMode = searchNdcs && searchNdcs.length > 0;
 
   // If NDC search parameter is provided, use those NDCs for partial matching
@@ -71,7 +74,7 @@ export const getOptimizationRecommendations = async (
     // But we'll also find matches through partial search in return_reports
     const { data: foundProducts } = await db
       .from('product_list_items')
-      .select('id, ndc, product_name, quantity')
+      .select('id, ndc, product_name, quantity, lot_number, expiration_date')
       .eq('added_by', pharmacyId);
     
     // Create a map of found products for reference
@@ -88,13 +91,15 @@ export const getOptimizationRecommendations = async (
         ndc: searchTerm,
         product_name: `Product ${searchTerm}`, // Default name, will be updated if match found
         quantity: 1, // Default quantity
+        lot_number: undefined,
+        expiration_date: undefined,
       };
     });
   } else {
     // Step 1: Get all product list items for this pharmacy
     const { data: items, error: itemsError } = await db
       .from('product_list_items')
-      .select('id, ndc, product_name, quantity')
+      .select('id, ndc, product_name, quantity, lot_number, expiration_date')
       .eq('added_by', pharmacyId);
 
     if (itemsError) {
@@ -345,7 +350,13 @@ export const getOptimizationRecommendations = async (
   // In search mode, update productItems to use actual matched NDCs
   if (isSearchMode && Object.keys(searchTermToActualNdc).length > 0) {
     // Create a map of actual NDCs to product info
-    const actualNdcToProduct: Map<string, { product_name: string; quantity: number }> = new Map();
+    const actualNdcToProduct: Map<string, { 
+      id: string; 
+      product_name: string; 
+      quantity: number; 
+      lot_number?: string; 
+      expiration_date?: string;
+    }> = new Map();
     
     productItems.forEach(item => {
       const actualNdc = searchTermToActualNdc[item.ndc];
@@ -353,10 +364,13 @@ export const getOptimizationRecommendations = async (
         // Use actual NDC, keep product info
         if (!actualNdcToProduct.has(actualNdc)) {
           actualNdcToProduct.set(actualNdc, {
+            id: item.id || '',
             product_name: item.product_name === `Product ${item.ndc}` 
               ? `Product ${actualNdc}` 
               : item.product_name,
-            quantity: item.quantity
+            quantity: item.quantity,
+            lot_number: item.lot_number,
+            expiration_date: item.expiration_date,
           });
         }
       }
@@ -364,10 +378,12 @@ export const getOptimizationRecommendations = async (
     
     // Update productItems with actual NDCs
     productItems = Array.from(actualNdcToProduct.entries()).map(([ndc, info]) => ({
-      id: '',
+      id: info.id,
       ndc,
       product_name: info.product_name,
-      quantity: info.quantity
+      quantity: info.quantity,
+      lot_number: info.lot_number,
+      expiration_date: info.expiration_date,
     }));
     
     // Update ndcs array with actual matched NDCs
@@ -447,9 +463,12 @@ export const getOptimizationRecommendations = async (
 
     // Store the distributor averages for this NDC (we'll select recommended after availability check)
     recommendations.push({
+      id: productItem.id,
       ndc,
       productName: productItem.product_name || `Product ${ndc}`,
       quantity: productItem.quantity || 1,
+      lotNumber: productItem.lot_number || undefined,
+      expirationDate: productItem.expiration_date || undefined,
       recommendedDistributor: '', // Will be set after availability check
       expectedPrice: 0, // Will be set after availability check
       worstPrice: distributorAverages[distributorAverages.length - 1].price, // Lowest price
