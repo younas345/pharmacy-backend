@@ -43,6 +43,13 @@ export const optimizationSchemas = {
   OptimizationRecommendation: {
     type: 'object',
     properties: {
+      id: {
+        type: 'string',
+        format: 'uuid',
+        nullable: true,
+        example: '123e4567-e89b-12d3-a456-426614174000',
+        description: 'Product list item ID',
+      },
       ndc: {
         type: 'string',
         example: '00093-2263-01',
@@ -55,6 +62,19 @@ export const optimizationSchemas = {
         type: 'number',
         example: 13,
         description: 'Quantity of the product in the pharmacy list',
+      },
+      lotNumber: {
+        type: 'string',
+        nullable: true,
+        example: 'LOT123456',
+        description: 'Lot number of the product',
+      },
+      expirationDate: {
+        type: 'string',
+        format: 'date',
+        nullable: true,
+        example: '2025-12-31',
+        description: 'Expiration date of the product',
       },
       recommendedDistributor: {
         type: 'string',

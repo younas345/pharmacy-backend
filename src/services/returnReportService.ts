@@ -1273,56 +1273,149 @@ export const saveReturnReport = async (
   const invalidItems: any[] = [];
 
   if (enableNdcValidation) {
-    console.log('🔍 NDC validation is ENABLED - validating against ndc_products and ndc_packages');
+    console.log('🔍 NDC validation is ENABLED - validating against RxNav API (https://rxnav.nlm.nih.gov/REST/ndcstatus.json)');
     
-    for (const item of items) {
-      const ndcCode = item.ndcCode;
-      
+    // Helper function to normalize NDC code (remove dashes, ensure 11 digits)
+    const normalizeNdc = (ndc: string): string => {
+      // Remove all non-digit characters
+      const digits = ndc.replace(/\D/g, '');
+      // Return as 11-digit string (pad with zeros if needed, or truncate if too long)
+      if (digits.length === 10) {
+        // 10-digit NDC: add leading zero
+        return '0' + digits;
+      } else if (digits.length === 11) {
+        return digits;
+      } else if (digits.length > 11) {
+        // Take first 11 digits
+        return digits.substring(0, 11);
+      } else {
+        // Pad with zeros to make 11 digits
+        return digits.padStart(11, '0');
+      }
+    };
+
+    // Collect all unique NDC codes from items
+    const ndcMap = new Map<string, any[]>(); // Map NDC -> items with that NDC
+    items.forEach(item => {
+      const ndcCode = item.ndcCode || (item as any).ndc;
       if (!ndcCode) {
         invalidItems.push({ ...item, reason: 'Missing NDC code' });
-        console.log(`❌ Invalid NDC: MISSING - Item: ${item.itemName || 'Unknown'}`);
-        continue;
+        return;
       }
+      const normalizedNdc = normalizeNdc(String(ndcCode));
+      if (!ndcMap.has(normalizedNdc)) {
+        ndcMap.set(normalizedNdc, []);
+      }
+      ndcMap.get(normalizedNdc)!.push(item);
+    });
 
-      // Check if NDC exists in ndc_products or ndc_packages
-      const [productCheck, packageCheck] = await Promise.all([
-        db.from('ndc_products')
-          .select('product_ndc')
-          .eq('product_ndc', ndcCode)
-          .limit(1)
-          .maybeSingle(),
-        db.from('ndc_packages')
-          .select('ndc_package_code')
-          .eq('ndc_package_code', ndcCode)
-          .limit(1)
-          .maybeSingle(),
-      ]);
+    const uniqueNdcs = Array.from(ndcMap.keys());
+    console.log(`📋 Found ${uniqueNdcs.length} unique NDC codes to validate`);
 
-      // If found in either table, it's valid
-      const foundInProducts = productCheck.data !== null;
-      const foundInPackages = packageCheck.data !== null;
+    // Validate all NDCs using RxNav API with Promise.allSettled
+    const validationPromises = uniqueNdcs.map(async (normalizedNdc) => {
+      try {
+        const apiUrl = `https://rxnav.nlm.nih.gov/REST/ndcstatus.json?ndc=${normalizedNdc}`;
+        const response = await fetch(apiUrl);
+        const data = await response.json() as { ndcStatus?: { status?: string; active?: string; conceptName?: string } };
+        
+        return {
+          ndc: normalizedNdc,
+          success: true,
+          data: data,
+          status: 'fulfilled' as const
+        };
+      } catch (error: any) {
+        return {
+          ndc: normalizedNdc,
+          success: false,
+          error: error.message,
+          status: 'rejected' as const
+        };
+      }
+    });
+
+    const validationResults = await Promise.allSettled(validationPromises);
+
+    // Process validation results
+    console.log('\n📊 RxNav API Validation Results:');
+    console.log('═══════════════════════════════════════════════════════════');
+    
+    validationResults.forEach((result, index) => {
+      const ndc = uniqueNdcs[index];
+      const itemsForNdc = ndcMap.get(ndc) || [];
       
-      if (foundInProducts || foundInPackages) {
-        validatedItems.push(item);
+      if (result.status === 'fulfilled') {
+        const validationResult = result.value;
+        
+        if (validationResult.success && validationResult.data) {
+          const ndcStatus = validationResult.data.ndcStatus;
+          
+          // Log the full API response
+          console.log(`\n🔍 NDC: ${ndc}`);
+          console.log(`   API Response:`, JSON.stringify(validationResult.data, null, 2));
+          
+          // Check if NDC is valid (status: "ACTIVE" and active: "YES")
+          if (ndcStatus && ndcStatus.status === 'ACTIVE' && ndcStatus.active === 'YES') {
+            console.log(`   ✅ VALID - Status: ${ndcStatus.status}, Active: ${ndcStatus.active}`);
+            if (ndcStatus.conceptName) {
+              console.log(`   📦 Product: ${ndcStatus.conceptName}`);
+            }
+            // Add all items with this NDC to validated items
+            validatedItems.push(...itemsForNdc);
+          } else {
+            const status = ndcStatus?.status || 'UNKNOWN';
+            const active = ndcStatus?.active || 'UNKNOWN';
+            console.log(`   ❌ INVALID - Status: ${status}, Active: ${active}`);
+            itemsForNdc.forEach(item => {
+              invalidItems.push({ 
+                ...item, 
+                reason: `NDC status: ${status}, active: ${active}` 
+              });
+            });
+          }
+        } else {
+          console.log(`\n🔍 NDC: ${ndc}`);
+          console.log(`   ❌ API call failed: ${validationResult.error || 'Unknown error'}`);
+          itemsForNdc.forEach(item => {
+            invalidItems.push({ 
+              ...item, 
+              reason: `API validation failed: ${validationResult.error || 'Unknown error'}` 
+            });
+          });
+        }
       } else {
-        invalidItems.push({ ...item, reason: 'NDC code not found in database' });
-        console.log(`❌ Invalid NDC: "${ndcCode}" - Item: ${item.itemName || 'Unknown'} - Not found in ndc_products or ndc_packages`);
+        console.log(`\n🔍 NDC: ${ndc}`);
+        console.log(`   ❌ Promise rejected: ${result.reason || 'Unknown error'}`);
+        itemsForNdc.forEach(item => {
+          invalidItems.push({ 
+            ...item, 
+            reason: `Promise rejected: ${result.reason || 'Unknown error'}` 
+          });
+        });
       }
-    }
+    });
 
-    // Log validation results
+    console.log('\n═══════════════════════════════════════════════════════════');
+    console.log(`📊 Validation Summary:`);
+    console.log(`   ✅ Valid NDCs: ${validatedItems.length} items`);
+    console.log(`   ❌ Invalid NDCs: ${invalidItems.length} items`);
+
+    // Log invalid items details
     if (invalidItems.length > 0) {
       console.log(`\n⚠️  ${invalidItems.length} items skipped due to invalid/missing NDC codes`);
       console.log(`📋 Invalid NDC Codes List:`);
       invalidItems.forEach((item, index) => {
-        console.log(`   ${index + 1}. NDC: "${item.ndcCode || 'MISSING'}" - ${item.itemName || 'Unknown'} - Reason: ${item.reason}`);
+        const ndc = item.ndcCode || item.ndc || 'MISSING';
+        console.log(`   ${index + 1}. NDC: "${ndc}" - ${item.itemName || item.productDescription || 'Unknown'} - Reason: ${item.reason}`);
       });
     }
-    console.log(`\n✅ ${validatedItems.length} items with valid NDC codes will be inserted`);
 
     if (validatedItems.length === 0) {
-      throw new AppError('No items with valid NDC codes to save', 400);
+      throw new AppError('No items with valid NDC codes to save (all NDCs failed RxNav API validation)', 400);
     }
+    
+    console.log(`\n✅ ${validatedItems.length} items with valid NDC codes will be inserted`);
   } else {
     console.log('⚠️  NDC validation is DISABLED - accepting all items without validation');
     // If validation is disabled, accept all items

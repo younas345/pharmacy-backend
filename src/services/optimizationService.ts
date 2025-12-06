@@ -2,9 +2,12 @@ import { supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
 
 export interface OptimizationRecommendation {
+  id?: string;
   ndc: string;
   productName: string;
   quantity: number;
+  lotNumber?: string;
+  expirationDate?: string;
   recommendedDistributor: string;
   recommendedDistributorContact?: {
     email?: string;
@@ -55,7 +58,7 @@ export const getOptimizationRecommendations = async (
   const db = supabaseAdmin;
 
   let ndcs: string[] = [];
-  let productItems: Array<{ id: string; ndc: string; product_name: string; quantity: number }> = [];
+  let productItems: Array<{ id: string; ndc: string; product_name: string; quantity: number; lot_number?: string; expiration_date?: string }> = [];
   const isSearchMode = searchNdcs && searchNdcs.length > 0;
 
   // If NDC search parameter is provided, use those NDCs for partial matching
@@ -71,7 +74,7 @@ export const getOptimizationRecommendations = async (
     // But we'll also find matches through partial search in return_reports
     const { data: foundProducts } = await db
       .from('product_list_items')
-      .select('id, ndc, product_name, quantity')
+      .select('id, ndc, product_name, quantity, lot_number, expiration_date')
       .eq('added_by', pharmacyId);
     
     // Create a map of found products for reference
@@ -79,22 +82,43 @@ export const getOptimizationRecommendations = async (
       (foundProducts || []).map(p => [String(p.ndc).replace(/-/g, '').trim(), p])
     );
     
+    console.log(`📋 Pharmacy has ${foundProducts?.length || 0} products in inventory`);
+    if (foundProducts && foundProducts.length > 0) {
+      console.log(`📋 Pharmacy product NDCs:`, foundProducts.map(p => p.ndc));
+    }
+    
     // Initialize product items with search terms (will be updated with actual matches later)
     productItems = searchTerms.map(searchTerm => {
-      // Try to find exact match first
+      // Try to find exact match first in pharmacy's inventory
       const found = productMap.get(searchTerm);
-      return found || {
-        id: '',
-        ndc: searchTerm,
-        product_name: `Product ${searchTerm}`, // Default name, will be updated if match found
-        quantity: 1, // Default quantity
-      };
+      if (found) {
+        console.log(`✅ Found search term "${searchTerm}" in pharmacy inventory as "${found.ndc}"`);
+        // Return the product with its ORIGINAL NDC format from pharmacy inventory
+        return {
+          id: found.id,
+          ndc: found.ndc, // ✅ Use original NDC format from pharmacy
+          product_name: found.product_name,
+          quantity: found.quantity,
+          lot_number: found.lot_number,
+          expiration_date: found.expiration_date,
+        };
+      } else {
+        console.log(`⚠️ Search term "${searchTerm}" NOT found in pharmacy inventory`);
+        return {
+          id: '',
+          ndc: searchTerm, // Use normalized version as fallback
+          product_name: `Product ${searchTerm}`,
+          quantity: 1,
+          lot_number: undefined,
+          expiration_date: undefined,
+        };
+      }
     });
   } else {
     // Step 1: Get all product list items for this pharmacy
     const { data: items, error: itemsError } = await db
       .from('product_list_items')
-      .select('id, ndc, product_name, quantity')
+      .select('id, ndc, product_name, quantity, lot_number, expiration_date')
       .eq('added_by', pharmacyId);
 
     if (itemsError) {
@@ -164,6 +188,10 @@ export const getOptimizationRecommendations = async (
 
   console.log(`📦 Found ${returnReports?.length || 0} return report records`);
   console.log(`🔍 Looking for NDCs:`, ndcs);
+  if (isSearchMode && searchNdcs) {
+    console.log(`🔍 Original search NDCs (from query param):`, searchNdcs);
+    console.log(`🔍 Normalized search NDCs (for matching):`, ndcs);
+  }
   
   // Debug: Check what distributors we have in the data
   const allDistributors = new Set<string>();
@@ -192,6 +220,9 @@ export const getOptimizationRecommendations = async (
 
   // Map to track which search term matched which actual NDC (for search mode)
   const searchTermToActualNdc: Record<string, string> = {};
+  
+  // Map to track product names from return_reports (for NDCs not in pharmacy inventory)
+  const ndcToProductNameMap: Record<string, string> = {};
 
   // Initialize map for all NDCs
   ndcs.forEach((ndc) => {
@@ -200,8 +231,18 @@ export const getOptimizationRecommendations = async (
 
   // Process return reports
   // Each return_reports record contains a single item in the data field
+  if (isSearchMode) {
+    console.log(`\n=== PROCESSING RETURN REPORTS FOR SEARCH MODE ===`);
+  }
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
+    
+    if (isSearchMode) {
+      console.log(`\n📄 Processing report ${report.id}`);
+      console.log(`   Data keys:`, data ? Object.keys(data) : 'null');
+      console.log(`   Data.ndcCode:`, data?.ndcCode);
+      console.log(`   Data.ndc:`, data?.ndc);
+    }
     
     // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
     const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
@@ -240,37 +281,62 @@ export const getOptimizationRecommendations = async (
       const ndcCode = item.ndcCode || item.ndc;
       
       if (!ndcCode) {
+        if (isSearchMode) {
+          console.log(`⚠️ No NDC found in item. Item keys:`, Object.keys(item || {}));
+        }
         return;
       }
 
       // Normalize NDC for comparison (remove dashes and convert to string)
       const normalizedNdcCode = String(ndcCode).replace(/-/g, '').trim();
       
+      // Debug logging for search mode
+      if (isSearchMode) {
+        console.log(`🔍 Checking NDC: "${ndcCode}" (normalized: "${normalizedNdcCode}") against search terms:`, ndcs);
+      }
+      
       // Find matching NDC from product list or search terms
       let matchingNdc: string | undefined;
       let actualNdcKey: string; // The key to use in ndcPricingMap
       
       if (isSearchMode) {
-        // Partial match mode: check if search term is contained in NDC or vice versa
+        // Exact match mode: check if normalized NDC exactly matches any search term
+        // In search mode, ndcs array already contains normalized search terms (from line 71)
         const matchedSearchTerm = ndcs.find(searchTerm => {
+          // searchTerm is already normalized (no dashes) from line 67-71
           const normalizedSearchTerm = String(searchTerm).replace(/-/g, '').trim();
-          // Check if search term matches the beginning of NDC (LIKE logic)
-          // e.g., "42385" should match "42385097801"
-          return normalizedNdcCode.startsWith(normalizedSearchTerm) || 
-                 normalizedSearchTerm.startsWith(normalizedNdcCode) ||
-                 normalizedNdcCode === normalizedSearchTerm;
+          // Use exact match for better accuracy when user provides specific NDC
+          return normalizedNdcCode === normalizedSearchTerm;
         });
         
         if (!matchedSearchTerm) {
+          if (isSearchMode) {
+            console.log(`❌ NDC "${ndcCode}" (normalized: "${normalizedNdcCode}") did not match any search term`);
+          }
           return;
         }
         
-        // Use the actual NDC from return_reports as the key (not the search term)
-        actualNdcKey = normalizedNdcCode;
+        // Use the ORIGINAL NDC format from return_reports (preserve dashes)
+        const originalNdcFormat = String(ndcCode).trim();
+        actualNdcKey = originalNdcFormat;
         matchingNdc = matchedSearchTerm;
         
-        // Track which search term matched this actual NDC
-        searchTermToActualNdc[matchedSearchTerm] = normalizedNdcCode;
+        // Track which search term matched which actual NDC (store original format with dashes)
+        searchTermToActualNdc[matchedSearchTerm] = originalNdcFormat;
+        
+        // Extract product name from return_reports data field (try various field names)
+        // Priority: itemName (most common in return_reports.data) > productName > product_name > product > description > drugName > name
+        const productName = item.itemName || item.productName || item.product_name || item.product || item.description || item.drugName || item.name;
+        if (productName && !ndcToProductNameMap[originalNdcFormat]) {
+          const fieldName = item.itemName ? 'itemName' : item.productName ? 'productName' : item.product_name ? 'product_name' : 'other';
+          ndcToProductNameMap[originalNdcFormat] = String(productName).trim();
+          console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}"`);
+          console.log(`   📦 Product name from return_reports.data.${fieldName}: "${productName}"`);
+        } else if (productName && ndcToProductNameMap[originalNdcFormat]) {
+          console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}" (product name already stored)`);
+        } else {
+          console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}" (no product name in return_reports data)`);
+        }
         
         // Initialize map entry for actual NDC if not exists
         if (!ndcPricingMap[actualNdcKey]) {
@@ -344,31 +410,109 @@ export const getOptimizationRecommendations = async (
 
   // In search mode, update productItems to use actual matched NDCs
   if (isSearchMode && Object.keys(searchTermToActualNdc).length > 0) {
+    console.log(`\n=== MERGING PHARMACY PRODUCTS WITH RETURN REPORTS ===`);
+    console.log(`searchTermToActualNdc map:`, searchTermToActualNdc);
+    console.log(`productItems from pharmacy:`, productItems.map(p => ({ ndc: p.ndc, name: p.product_name })));
+    
     // Create a map of actual NDCs to product info
-    const actualNdcToProduct: Map<string, { product_name: string; quantity: number }> = new Map();
+    const actualNdcToProduct: Map<string, { 
+      id: string; 
+      product_name: string; 
+      quantity: number; 
+      lot_number?: string; 
+      expiration_date?: string;
+    }> = new Map();
     
     productItems.forEach(item => {
-      const actualNdc = searchTermToActualNdc[item.ndc];
+      // Normalize item.ndc to match against searchTermToActualNdc keys
+      const normalizedItemNdc = String(item.ndc).replace(/-/g, '').trim();
+      const actualNdc = searchTermToActualNdc[normalizedItemNdc];
+      
+      console.log(`  Checking item.ndc="${item.ndc}" (normalized="${normalizedItemNdc}") → actualNdc="${actualNdc || 'NOT FOUND'}"`);
+      
       if (actualNdc) {
-        // Use actual NDC, keep product info
+        // Use actual NDC from return_reports, keep product info from pharmacy
         if (!actualNdcToProduct.has(actualNdc)) {
+          console.log(`  ✅ Adding actualNdc="${actualNdc}" with pharmacy product info`);
           actualNdcToProduct.set(actualNdc, {
+            id: item.id || '',
             product_name: item.product_name === `Product ${item.ndc}` 
               ? `Product ${actualNdc}` 
               : item.product_name,
-            quantity: item.quantity
+            quantity: item.quantity,
+            lot_number: item.lot_number,
+            expiration_date: item.expiration_date,
           });
         }
       }
     });
     
+    // Add any matched NDCs from searchTermToActualNdc that weren't in productItems
+    // This handles the case where the NDC was found in return_reports but not in pharmacy's inventory
+    for (const [searchTerm, actualNdc] of Object.entries(searchTermToActualNdc)) {
+      if (!actualNdcToProduct.has(actualNdc)) {
+        console.log(`✨ Adding matched NDC ${actualNdc} from return_reports (not in pharmacy inventory)`);
+        
+        // Try to get product name from return_reports.data first (from itemName field)
+        let productName = ndcToProductNameMap[actualNdc];
+        
+        // If not in return_reports, try to fetch from products table
+        if (!productName) {
+          console.log(`   🔍 Product name not found in return_reports.data, fetching from products table for NDC ${actualNdc}...`);
+          const { data: productData } = await db
+            .from('products')
+            .select('product_name')
+            .eq('ndc', actualNdc)
+            .limit(1)
+            .maybeSingle();
+          
+          if (productData?.product_name) {
+            productName = productData.product_name;
+            console.log(`   ✅ Found product name in products table: "${productName}"`);
+          } else {
+            // Also try with normalized NDC (without dashes)
+            const normalizedNdc = String(actualNdc).replace(/-/g, '').trim();
+            const { data: productData2 } = await db
+              .from('products')
+              .select('product_name')
+              .eq('ndc', normalizedNdc)
+              .limit(1)
+              .maybeSingle();
+            
+            if (productData2?.product_name) {
+              productName = productData2.product_name;
+              console.log(`   ✅ Found product name in products table (normalized): "${productName}"`);
+            } else {
+              productName = `Product ${actualNdc}`;
+              console.log(`   ⚠️ Product name not found anywhere, using default: "${productName}"`);
+            }
+          }
+        } else {
+          console.log(`   ✅ Using product name from return_reports.data.itemName: "${productName}"`);
+        }
+        
+        actualNdcToProduct.set(actualNdc, {
+          id: '',
+          product_name: productName,
+          quantity: 1, // Default quantity for searched items
+          lot_number: undefined,
+          expiration_date: undefined,
+        });
+      }
+    }
+    
     // Update productItems with actual NDCs
     productItems = Array.from(actualNdcToProduct.entries()).map(([ndc, info]) => ({
-      id: '',
+      id: info.id,
       ndc,
       product_name: info.product_name,
-      quantity: info.quantity
+      quantity: info.quantity,
+      lot_number: info.lot_number,
+      expiration_date: info.expiration_date,
     }));
+    
+    console.log(`📦 Final productItems (${productItems.length} items):`, productItems.map(p => ({ ndc: p.ndc, name: p.product_name, qty: p.quantity })));
+    console.log(`=== END MERGING ===\n`);
     
     // Update ndcs array with actual matched NDCs
     ndcs = [...new Set(Array.from(actualNdcToProduct.keys()))];
@@ -447,9 +591,12 @@ export const getOptimizationRecommendations = async (
 
     // Store the distributor averages for this NDC (we'll select recommended after availability check)
     recommendations.push({
+      id: productItem.id,
       ndc,
       productName: productItem.product_name || `Product ${ndc}`,
       quantity: productItem.quantity || 1,
+      lotNumber: productItem.lot_number || undefined,
+      expirationDate: productItem.expiration_date || undefined,
       recommendedDistributor: '', // Will be set after availability check
       expectedPrice: 0, // Will be set after availability check
       worstPrice: distributorAverages[distributorAverages.length - 1].price, // Lowest price
@@ -833,6 +980,121 @@ export const getOptimizationRecommendations = async (
   });
 
   const potentialAdditionalEarnings = Math.max(0, multipleDistributorsStrategy - singleDistributorStrategy);
+
+  // Filter recommendations by search NDCs if in search mode
+  let filteredRecommendations = recommendations;
+  if (isSearchMode && searchNdcs && searchNdcs.length > 0) {
+    console.log(`\n=== FILTERING RECOMMENDATIONS ===`);
+    console.log(`Total recommendations before filter:`, recommendations.length);
+    console.log(`Recommendations NDCs:`, recommendations.map(r => r.ndc));
+    
+    // Normalize search NDCs for comparison (remove dashes)
+    const normalizedSearchNdcs = searchNdcs.map(n => String(n).replace(/-/g, '').trim().toLowerCase());
+    console.log(`Original search NDCs (from user):`, searchNdcs);
+    console.log(`Normalized search NDCs (for filter):`, normalizedSearchNdcs);
+    
+    // Filter recommendations to only include those matching the search NDCs
+    // Use exact matching after normalization to ensure we only return the specific NDCs requested
+    filteredRecommendations = recommendations.filter(rec => {
+      const normalizedRecNdc = String(rec.ndc).replace(/-/g, '').trim().toLowerCase();
+      const matches = normalizedSearchNdcs.some(searchNdc => 
+        normalizedRecNdc === searchNdc
+      );
+      console.log(`Checking rec.ndc="${rec.ndc}" (normalized="${normalizedRecNdc}") → ${matches ? '✅ MATCH' : '❌ NO MATCH'}`);
+      return matches;
+    });
+    
+    console.log(`Total recommendations after filter:`, filteredRecommendations.length);
+    console.log(`=== END FILTERING ===\n`);
+    
+    // Recalculate totalPotentialSavings based on filtered recommendations
+    const filteredTotalPotentialSavings = filteredRecommendations.reduce((sum, rec) => sum + rec.savings, 0);
+    
+    // Recalculate earnings comparison based on filtered recommendations
+    const filteredAllDistributorNames = new Set<string>();
+    filteredRecommendations.forEach((rec) => {
+      filteredAllDistributorNames.add(rec.recommendedDistributor);
+      rec.alternativeDistributors.forEach((alt) => {
+        filteredAllDistributorNames.add(alt.name);
+      });
+    });
+
+    const filteredDistributorTotalEarnings: Record<string, number> = {};
+    
+    for (const distributorName of filteredAllDistributorNames) {
+      let totalEarnings = 0;
+      
+      filteredRecommendations.forEach((rec) => {
+        let price: number | null = null;
+        
+        if (rec.recommendedDistributor === distributorName) {
+          price = rec.expectedPrice;
+        } else {
+          const altDist = rec.alternativeDistributors.find(alt => alt.name === distributorName);
+          if (altDist) {
+            price = altDist.price;
+          }
+        }
+        
+        const finalPrice = price !== null ? price : rec.worstPrice;
+        totalEarnings += finalPrice * rec.quantity;
+      });
+      
+      filteredDistributorTotalEarnings[distributorName] = totalEarnings;
+    }
+
+    const filteredBestSingleDistributor = Object.entries(filteredDistributorTotalEarnings)
+      .sort((a, b) => b[1] - a[1])[0];
+    
+    const filteredSingleDistributorStrategy = filteredBestSingleDistributor ? filteredBestSingleDistributor[1] : 0;
+
+    let filteredMultipleDistributorsStrategy = 0;
+
+    filteredRecommendations.forEach((rec) => {
+      const allOptions = [
+        { 
+          name: rec.recommendedDistributor, 
+          price: rec.expectedPrice, 
+          stillAvailableThisMonth: distributorNameToStillAvailableMap[rec.recommendedDistributor] ?? false 
+        },
+        ...rec.alternativeDistributors.map((alt) => ({
+          name: alt.name,
+          price: alt.price,
+          stillAvailableThisMonth: distributorNameToStillAvailableMap[alt.name] ?? false,
+        })),
+      ];
+
+      const availableThisMonthOptions = allOptions
+        .sort((a, b) => b.price - a.price);
+
+      if (availableThisMonthOptions.length > 0) {
+        const bestAvailable = availableThisMonthOptions[0];
+        const earnings = bestAvailable.price * rec.quantity;
+        filteredMultipleDistributorsStrategy += earnings;
+      } else {
+        const earnings = rec.expectedPrice * rec.quantity;
+        filteredMultipleDistributorsStrategy += earnings;
+      }
+    });
+
+    const filteredPotentialAdditionalEarnings = Math.max(0, filteredMultipleDistributorsStrategy - filteredSingleDistributorStrategy);
+
+    return {
+      recommendations: filteredRecommendations,
+      totalPotentialSavings: filteredTotalPotentialSavings,
+      generatedAt: new Date().toISOString(),
+      distributorUsage: {
+        usedThisMonth,
+        totalDistributors,
+        stillAvailable,
+      },
+      earningsComparison: {
+        singleDistributorStrategy: Math.round(filteredSingleDistributorStrategy * 100) / 100,
+        multipleDistributorsStrategy: Math.round(filteredMultipleDistributorsStrategy * 100) / 100,
+        potentialAdditionalEarnings: Math.round(filteredPotentialAdditionalEarnings * 100) / 100,
+      },
+    };
+  }
 
   return {
     recommendations,
