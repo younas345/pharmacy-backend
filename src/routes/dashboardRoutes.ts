@@ -12,7 +12,7 @@ router.use(authenticate);
  * /api/dashboard/summary:
  *   get:
  *     summary: Get dashboard summary statistics for authenticated pharmacy
- *     description: Returns dashboard summary with total pharmacy added products count and top distributor count. Top distributors are determined using the same logic as the top distributors API - active distributors that have documents with this pharmacy. Pharmacy ID is automatically determined from authentication token.
+ *     description: Returns dashboard summary with total pharmacy added products count, top distributor count, and package statistics. Top distributors are determined using the same logic as the top distributors API - active distributors that have documents with this pharmacy. Package statistics are calculated using the same logic as /api/optimization/custom-packages. Pharmacy ID is automatically determined from authentication token.
  *     tags: [Dashboard]
  *     security:
  *       - bearerAuth: []
@@ -38,6 +38,18 @@ router.use(authenticate);
  *                       type: number
  *                       example: 4
  *                       description: Count of top distributors (active distributors with documents for this pharmacy)
+ *                     totalPackages:
+ *                       type: number
+ *                       example: 10
+ *                       description: Total number of custom packages (delivered + non-delivered)
+ *                     deliveredPackages:
+ *                       type: number
+ *                       example: 6
+ *                       description: Number of packages with status true (delivered)
+ *                     nonDeliveredPackages:
+ *                       type: number
+ *                       example: 4
+ *                       description: Number of packages with status false (non-delivered)
  *       401:
  *         description: Unauthorized - invalid or missing token
  *         content:

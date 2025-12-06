@@ -5,6 +5,9 @@ import { AppError } from '../utils/appError';
 export interface DashboardSummary {
   totalPharmacyAddedProducts: number;
   topDistributorCount: number;
+  totalPackages: number;
+  deliveredPackages: number;
+  nonDeliveredPackages: number;
   // Commented out fields - keeping for reference
   // totalDocuments: number;
   // documentsThisMonth: number;
@@ -64,6 +67,32 @@ export const getDashboardSummary = async (pharmacyId: string): Promise<Dashboard
       }
     }
   }
+
+  // Get package statistics using the same logic as /api/optimization/custom-packages
+  // Get count of packages with status true (delivered)
+  const { count: deliveredPackagesCount, error: deliveredCountError } = await db
+    .from('custom_packages')
+    .select('*', { count: 'exact', head: true })
+    .eq('pharmacy_id', pharmacyId)
+    .eq('status', true);
+
+  if (deliveredCountError) {
+    throw new AppError(`Failed to fetch delivered packages count: ${deliveredCountError.message}`, 400);
+  }
+
+  // Get count of packages with status false (non-delivered)
+  const { count: nonDeliveredPackagesCount, error: nonDeliveredCountError } = await db
+    .from('custom_packages')
+    .select('*', { count: 'exact', head: true })
+    .eq('pharmacy_id', pharmacyId)
+    .eq('status', false);
+
+  if (nonDeliveredCountError) {
+    throw new AppError(`Failed to fetch non-delivered packages count: ${nonDeliveredCountError.message}`, 400);
+  }
+
+  // Calculate total packages (delivered + non-delivered)
+  const totalPackages = (deliveredPackagesCount || 0) + (nonDeliveredPackagesCount || 0);
 
   // Commented out - old logic for reference
   // // Get total documents
@@ -197,6 +226,9 @@ export const getDashboardSummary = async (pharmacyId: string): Promise<Dashboard
   return {
     totalPharmacyAddedProducts: pharmacyAddedProductsCount || 0,
     topDistributorCount: topDistributorCount,
+    totalPackages: totalPackages,
+    deliveredPackages: deliveredPackagesCount || 0,
+    nonDeliveredPackages: nonDeliveredPackagesCount || 0,
     // Commented out - old return values for reference
     // totalDocuments: documentsCount || 0,
     // documentsThisMonth: documentsThisMonthCount || 0,
