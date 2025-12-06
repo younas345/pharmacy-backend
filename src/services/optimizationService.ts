@@ -220,6 +220,9 @@ export const getOptimizationRecommendations = async (
 
   // Map to track which search term matched which actual NDC (for search mode)
   const searchTermToActualNdc: Record<string, string> = {};
+  
+  // Map to track product names from return_reports (for NDCs not in pharmacy inventory)
+  const ndcToProductNameMap: Record<string, string> = {};
 
   // Initialize map for all NDCs
   ndcs.forEach((ndc) => {
@@ -320,7 +323,20 @@ export const getOptimizationRecommendations = async (
         
         // Track which search term matched which actual NDC (store original format with dashes)
         searchTermToActualNdc[matchedSearchTerm] = originalNdcFormat;
-        console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}" (preserving original format)`);
+        
+        // Extract product name from return_reports data field (try various field names)
+        // Priority: itemName (most common in return_reports.data) > productName > product_name > product > description > drugName > name
+        const productName = item.itemName || item.productName || item.product_name || item.product || item.description || item.drugName || item.name;
+        if (productName && !ndcToProductNameMap[originalNdcFormat]) {
+          const fieldName = item.itemName ? 'itemName' : item.productName ? 'productName' : item.product_name ? 'product_name' : 'other';
+          ndcToProductNameMap[originalNdcFormat] = String(productName).trim();
+          console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}"`);
+          console.log(`   📦 Product name from return_reports.data.${fieldName}: "${productName}"`);
+        } else if (productName && ndcToProductNameMap[originalNdcFormat]) {
+          console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}" (product name already stored)`);
+        } else {
+          console.log(`✅ Matched! Search term "${matchedSearchTerm}" → Actual NDC "${originalNdcFormat}" (no product name in return_reports data)`);
+        }
         
         // Initialize map entry for actual NDC if not exists
         if (!ndcPricingMap[actualNdcKey]) {
@@ -433,18 +449,57 @@ export const getOptimizationRecommendations = async (
     
     // Add any matched NDCs from searchTermToActualNdc that weren't in productItems
     // This handles the case where the NDC was found in return_reports but not in pharmacy's inventory
-    Object.entries(searchTermToActualNdc).forEach(([searchTerm, actualNdc]) => {
+    for (const [searchTerm, actualNdc] of Object.entries(searchTermToActualNdc)) {
       if (!actualNdcToProduct.has(actualNdc)) {
         console.log(`✨ Adding matched NDC ${actualNdc} from return_reports (not in pharmacy inventory)`);
+        
+        // Try to get product name from return_reports.data first (from itemName field)
+        let productName = ndcToProductNameMap[actualNdc];
+        
+        // If not in return_reports, try to fetch from products table
+        if (!productName) {
+          console.log(`   🔍 Product name not found in return_reports.data, fetching from products table for NDC ${actualNdc}...`);
+          const { data: productData } = await db
+            .from('products')
+            .select('product_name')
+            .eq('ndc', actualNdc)
+            .limit(1)
+            .maybeSingle();
+          
+          if (productData?.product_name) {
+            productName = productData.product_name;
+            console.log(`   ✅ Found product name in products table: "${productName}"`);
+          } else {
+            // Also try with normalized NDC (without dashes)
+            const normalizedNdc = String(actualNdc).replace(/-/g, '').trim();
+            const { data: productData2 } = await db
+              .from('products')
+              .select('product_name')
+              .eq('ndc', normalizedNdc)
+              .limit(1)
+              .maybeSingle();
+            
+            if (productData2?.product_name) {
+              productName = productData2.product_name;
+              console.log(`   ✅ Found product name in products table (normalized): "${productName}"`);
+            } else {
+              productName = `Product ${actualNdc}`;
+              console.log(`   ⚠️ Product name not found anywhere, using default: "${productName}"`);
+            }
+          }
+        } else {
+          console.log(`   ✅ Using product name from return_reports.data.itemName: "${productName}"`);
+        }
+        
         actualNdcToProduct.set(actualNdc, {
           id: '',
-          product_name: `Product ${actualNdc}`,
+          product_name: productName,
           quantity: 1, // Default quantity for searched items
           lot_number: undefined,
           expiration_date: undefined,
         });
       }
-    });
+    }
     
     // Update productItems with actual NDCs
     productItems = Array.from(actualNdcToProduct.entries()).map(([ndc, info]) => ({
