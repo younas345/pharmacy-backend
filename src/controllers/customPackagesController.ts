@@ -120,7 +120,7 @@ export const deleteCustomPackageHandler = catchAsync(
   }
 );
 
-// Update package status to true
+// Update package status (mark as delivered with delivery information)
 export const updatePackageStatusHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const pharmacyId = req.pharmacyId;
@@ -134,12 +134,26 @@ export const updatePackageStatusHandler = catchAsync(
       throw new AppError('Package ID is required', 400);
     }
 
-    const updatedPackage = await updatePackageStatus(pharmacyId, packageId);
+    // Extract delivery information from request body (optional when marking as delivered)
+    const deliveryInfo = req.body.deliveryInfo ? {
+      deliveryDate: req.body.deliveryInfo.deliveryDate,
+      receivedBy: req.body.deliveryInfo.receivedBy,
+      deliveryCondition: req.body.deliveryInfo.deliveryCondition,
+      deliveryNotes: req.body.deliveryInfo.deliveryNotes,
+      trackingNumber: req.body.deliveryInfo.trackingNumber,
+      carrier: req.body.deliveryInfo.carrier,
+    } : undefined;
+
+    const updatedPackage = await updatePackageStatus(pharmacyId, packageId, deliveryInfo);
+
+    const message = updatedPackage.status 
+      ? 'Package marked as delivered successfully' 
+      : 'Package marked as not delivered successfully';
 
     res.status(200).json({
       status: 'success',
       data: updatedPackage,
-      message: 'Package status toggled successfully',
+      message,
     });
   }
 );

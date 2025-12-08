@@ -21,6 +21,16 @@ export interface CreateCustomPackageRequest {
   notes?: string;
 }
 
+// Interface for delivery information
+export interface PackageDeliveryInfo {
+  deliveryDate?: string; // ISO date string
+  receivedBy?: string;
+  deliveryCondition?: 'good' | 'damaged' | 'partial' | 'missing_items' | 'other';
+  deliveryNotes?: string;
+  trackingNumber?: string;
+  carrier?: 'UPS' | 'FedEx' | 'USPS' | 'DHL' | 'Other'; // Shipping company that delivered the package
+}
+
 // Interface for custom package response
 export interface CustomPackage {
   id: string;
@@ -38,6 +48,7 @@ export interface CustomPackage {
   totalEstimatedValue: number;
   notes?: string;
   status: boolean;
+  deliveryInfo?: PackageDeliveryInfo;
   createdAt: string;
   updatedAt: string;
 }
@@ -323,21 +334,37 @@ export const getCustomPackages = async (
   });
 
   // Build response
-  const packagesWithItems: CustomPackage[] = (packages || []).map((pkg: any) => ({
-    id: pkg.id,
-    packageNumber: pkg.package_number,
-    pharmacyId: pkg.pharmacy_id,
-    distributorName: pkg.distributor_name,
-    distributorId: pkg.distributor_id || undefined,
-    distributorContact: pkg.distributor_id ? distributorsMap[pkg.distributor_id] : undefined,
-    items: itemsByPackage[pkg.id] || [],
-    totalItems: pkg.total_items,
-    totalEstimatedValue: pkg.total_estimated_value,
-    notes: pkg.notes || undefined,
-    status: pkg.status,
-    createdAt: pkg.created_at,
-    updatedAt: pkg.updated_at,
-  }));
+  const packagesWithItems: CustomPackage[] = (packages || []).map((pkg: any) => {
+    // Build delivery info if package is delivered (status = true)
+    let packageDeliveryInfo: PackageDeliveryInfo | undefined;
+    if (pkg.status && pkg.delivery_date) {
+      packageDeliveryInfo = {
+        deliveryDate: pkg.delivery_date,
+        receivedBy: pkg.received_by || undefined,
+        deliveryCondition: pkg.delivery_condition as PackageDeliveryInfo['deliveryCondition'] | undefined,
+        deliveryNotes: pkg.delivery_notes || undefined,
+        trackingNumber: pkg.tracking_number || undefined,
+        carrier: pkg.carrier as PackageDeliveryInfo['carrier'] | undefined,
+      };
+    }
+
+    return {
+      id: pkg.id,
+      packageNumber: pkg.package_number,
+      pharmacyId: pkg.pharmacy_id,
+      distributorName: pkg.distributor_name,
+      distributorId: pkg.distributor_id || undefined,
+      distributorContact: pkg.distributor_id ? distributorsMap[pkg.distributor_id] : undefined,
+      items: itemsByPackage[pkg.id] || [],
+      totalItems: pkg.total_items,
+      totalEstimatedValue: pkg.total_estimated_value,
+      notes: pkg.notes || undefined,
+      status: pkg.status,
+      deliveryInfo: packageDeliveryInfo,
+      createdAt: pkg.created_at,
+      updatedAt: pkg.updated_at,
+    };
+  });
 
   // Calculate statistics
   // IMPORTANT: Stats are calculated from ALL packages (not paginated)
@@ -468,6 +495,19 @@ export const getCustomPackageById = async (
     }
   }
 
+  // Build delivery info if package is delivered (status = true)
+  let packageDeliveryInfo: PackageDeliveryInfo | undefined;
+  if (packageRecord.status && packageRecord.delivery_date) {
+    packageDeliveryInfo = {
+      deliveryDate: packageRecord.delivery_date,
+      receivedBy: packageRecord.received_by || undefined,
+      deliveryCondition: packageRecord.delivery_condition as PackageDeliveryInfo['deliveryCondition'] | undefined,
+      deliveryNotes: packageRecord.delivery_notes || undefined,
+      trackingNumber: packageRecord.tracking_number || undefined,
+      carrier: packageRecord.carrier as PackageDeliveryInfo['carrier'] | undefined,
+    };
+  }
+
   return {
     id: packageRecord.id,
     packageNumber: packageRecord.package_number,
@@ -486,6 +526,7 @@ export const getCustomPackageById = async (
     totalEstimatedValue: packageRecord.total_estimated_value,
     notes: packageRecord.notes || undefined,
     status: packageRecord.status,
+    deliveryInfo: packageDeliveryInfo,
     createdAt: packageRecord.created_at,
     updatedAt: packageRecord.updated_at,
   };
@@ -540,10 +581,11 @@ export const deleteCustomPackage = async (
   }
 };
 
-// Toggle package status (true to false, false to true)
+// Mark package as delivered with delivery information
 export const updatePackageStatus = async (
   pharmacyId: string,
-  packageId: string
+  packageId: string,
+  deliveryInfo?: PackageDeliveryInfo
 ): Promise<CustomPackage> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
@@ -563,17 +605,54 @@ export const updatePackageStatus = async (
     throw new AppError('Package not found or you do not have permission to update it', 404);
   }
 
-  // Get current status and toggle it
+  // Get current status
   const currentStatus = packageRecord.status === true || packageRecord.status === 'true';
-  const newStatus = !currentStatus;
+  
+  // If marking as delivered (status = true), require delivery information
+  if (!currentStatus && !deliveryInfo) {
+    throw new AppError('Delivery information is required when marking package as delivered', 400);
+  }
 
-  // Update status (toggle)
+  // If marking as delivered, validate required fields
+  if (!currentStatus && deliveryInfo) {
+    if (!deliveryInfo.deliveryDate) {
+      throw new AppError('Delivery date is required', 400);
+    }
+    if (!deliveryInfo.receivedBy) {
+      throw new AppError('Received by (person name) is required', 400);
+    }
+  }
+
+  // Prepare update data
+  const updateData: any = {
+    status: !currentStatus, // Toggle status
+    updated_at: new Date().toISOString(),
+  };
+
+  // If marking as delivered, add delivery information
+  if (!currentStatus && deliveryInfo) {
+    updateData.delivery_date = deliveryInfo.deliveryDate 
+      ? new Date(deliveryInfo.deliveryDate).toISOString() 
+      : new Date().toISOString();
+    updateData.received_by = deliveryInfo.receivedBy;
+    updateData.delivery_condition = deliveryInfo.deliveryCondition || 'good';
+    updateData.delivery_notes = deliveryInfo.deliveryNotes || null;
+    updateData.tracking_number = deliveryInfo.trackingNumber || null;
+    updateData.carrier = deliveryInfo.carrier || null;
+  } else if (currentStatus) {
+    // If marking as not delivered, clear delivery information
+    updateData.delivery_date = null;
+    updateData.received_by = null;
+    updateData.delivery_condition = null;
+    updateData.delivery_notes = null;
+    updateData.tracking_number = null;
+    updateData.carrier = null;
+  }
+
+  // Update package
   const { data: updatedPackage, error: updateError } = await db
     .from('custom_packages')
-    .update({
-      status: newStatus,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updateData)
     .eq('id', packageId)
     .eq('pharmacy_id', pharmacyId)
     .select()
@@ -627,6 +706,19 @@ export const updatePackageStatus = async (
     }
   }
 
+  // Build delivery info if package is delivered
+  let packageDeliveryInfo: PackageDeliveryInfo | undefined;
+  if (updatedPackage.status && updatedPackage.delivery_date) {
+    packageDeliveryInfo = {
+      deliveryDate: updatedPackage.delivery_date,
+      receivedBy: updatedPackage.received_by || undefined,
+      deliveryCondition: updatedPackage.delivery_condition as PackageDeliveryInfo['deliveryCondition'] | undefined,
+      deliveryNotes: updatedPackage.delivery_notes || undefined,
+      trackingNumber: updatedPackage.tracking_number || undefined,
+      carrier: updatedPackage.carrier as PackageDeliveryInfo['carrier'] | undefined,
+    };
+  }
+
   return {
     id: updatedPackage.id,
     packageNumber: updatedPackage.package_number,
@@ -645,6 +737,7 @@ export const updatePackageStatus = async (
     totalEstimatedValue: updatedPackage.total_estimated_value,
     notes: updatedPackage.notes || undefined,
     status: updatedPackage.status,
+    deliveryInfo: packageDeliveryInfo,
     createdAt: updatedPackage.created_at,
     updatedAt: updatedPackage.updated_at,
   };

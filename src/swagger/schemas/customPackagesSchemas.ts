@@ -107,6 +107,50 @@ export const customPackagesSchemas = {
     },
     nullable: true,
   },
+  PackageDeliveryInfo: {
+    type: 'object',
+    required: ['deliveryDate', 'receivedBy'],
+    properties: {
+      deliveryDate: {
+        type: 'string',
+        format: 'date-time',
+        example: '2025-12-05T10:30:00Z',
+        description: 'Date and time when the package was delivered',
+      },
+      receivedBy: {
+        type: 'string',
+        example: 'John Doe',
+        description: 'Name of the person who received the package',
+      },
+      deliveryCondition: {
+        type: 'string',
+        enum: ['good', 'damaged', 'partial', 'missing_items', 'other'],
+        default: 'good',
+        example: 'good',
+        description: 'Condition of the package upon delivery',
+      },
+      deliveryNotes: {
+        type: 'string',
+        example: 'Package received in good condition',
+        nullable: true,
+        description: 'Additional notes about the delivery',
+      },
+      trackingNumber: {
+        type: 'string',
+        example: '1Z999AA10123456784',
+        nullable: true,
+        description: 'Shipping tracking number',
+      },
+      carrier: {
+        type: 'string',
+        enum: ['UPS', 'FedEx', 'USPS', 'DHL', 'Other'],
+        nullable: true,
+        example: 'UPS',
+        description: 'Shipping carrier - The shipping company that delivered the package (e.g., UPS, FedEx, USPS, DHL, or Other)',
+      },
+    },
+    description: 'Delivery information when marking package as delivered',
+  },
   CustomPackage: {
     type: 'object',
     properties: {
@@ -163,7 +207,12 @@ export const customPackagesSchemas = {
       status: {
         type: 'boolean',
         example: false,
-        description: 'Status of the package (false = draft/inactive, true = marked/active)',
+        description: 'Status of the package (false = not delivered, true = delivered)',
+      },
+      deliveryInfo: {
+        $ref: '#/components/schemas/PackageDeliveryInfo',
+        nullable: true,
+        description: 'Delivery information (only present when status is true)',
       },
       createdAt: {
         type: 'string',

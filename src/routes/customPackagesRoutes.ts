@@ -191,8 +191,11 @@ router.delete('/:id', deleteCustomPackageHandler);
  * @swagger
  * /api/optimization/custom-packages/{id}/mark-status:
  *   patch:
- *     summary: Toggle package status
- *     description: Toggles the status of a custom package (false to true, true to false).
+ *     summary: Mark package as delivered or not delivered
+ *     description: |
+ *       Marks a custom package as delivered (status = true) or not delivered (status = false).
+ *       When marking as delivered, delivery information is required in the request body.
+ *       When marking as not delivered, delivery information is cleared.
  *     tags: [Optimization]
  *     security:
  *       - bearerAuth: []
@@ -205,13 +208,83 @@ router.delete('/:id', deleteCustomPackageHandler);
  *           format: uuid
  *         description: Package ID
  *         example: "123e4567-e89b-12d3-a456-426614174000"
+ *     requestBody:
+ *       required: false
+ *       description: Delivery information (required when marking as delivered)
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               deliveryInfo:
+ *                 type: object
+ *                 required:
+ *                   - deliveryDate
+ *                   - receivedBy
+ *                 properties:
+ *                   deliveryDate:
+ *                     type: string
+ *                     format: date-time
+ *                     description: Date and time when the package was delivered
+ *                     example: "2025-12-05T10:30:00Z"
+ *                   receivedBy:
+ *                     type: string
+ *                     description: Name of the person who received the package
+ *                     example: "John Doe"
+ *                   deliveryCondition:
+ *                     type: string
+ *                     enum: [good, damaged, partial, missing_items, other]
+ *                     default: good
+ *                     description: Condition of the package upon delivery
+ *                     example: "good"
+ *                   deliveryNotes:
+ *                     type: string
+ *                     description: Additional notes about the delivery
+ *                     example: "Package received in good condition"
+ *                   trackingNumber:
+ *                     type: string
+ *                     description: Shipping tracking number
+ *                     example: "1Z999AA10123456784"
+ *                   carrier:
+ *                     type: string
+ *                     enum: [UPS, FedEx, USPS, DHL, Other]
+ *                     description: Shipping carrier
+ *                     example: "UPS"
  *     responses:
  *       200:
- *         description: Package status toggled successfully
+ *         description: Package status updated successfully
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/GetCustomPackageResponse'
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Package marked as delivered successfully
+ *                 data:
+ *                   $ref: '#/components/schemas/GetCustomPackageResponse'
+ *       400:
+ *         description: Bad request - missing required delivery information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               missingDeliveryInfo:
+ *                 value:
+ *                   status: fail
+ *                   message: Delivery information is required when marking package as delivered
+ *               missingDeliveryDate:
+ *                 value:
+ *                   status: fail
+ *                   message: Delivery date is required
+ *               missingReceivedBy:
+ *                 value:
+ *                   status: fail
+ *                   message: Received by (person name) is required
  *       404:
  *         description: Package not found
  *         content:
