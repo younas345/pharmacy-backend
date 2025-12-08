@@ -172,7 +172,7 @@ export const extractTextFromPDF = async (pdfBuffer: Buffer): Promise<string> => 
 };
 
 // Extract PDF text in chunks with minimal overlap to ensure no data is missed
-export const extractTextFromPDFChunks = async (pdfBuffer: Buffer, pagesPerChunk: number = 5): Promise<Array<{ chunkIndex: number; text: string; pageRange: string }>> => {
+export const extractTextFromPDFChunks = async (pdfBuffer: Buffer, pagesPerChunk: number = 3): Promise<Array<{ chunkIndex: number; text: string; pageRange: string }>> => {
   try {
     // Try Azure Document Intelligence first if configured
     let totalText: string;
@@ -1452,8 +1452,8 @@ const fakePricesAndDistributor = (data: ReturnReportData): ReturnReportData => {
 };
 
 export const processReturnReport = async (pdfBuffer: Buffer): Promise<ReturnReportData> => {
-  // Step 1: Extract text from PDF in chunks (5 pages per chunk with minimal overlap to ensure nothing is missed)
-  const chunks = await extractTextFromPDFChunks(pdfBuffer, 5);
+  // Step 1: Extract text from PDF in chunks (3 pages per chunk with minimal overlap to ensure nothing is missed)
+  const chunks = await extractTextFromPDFChunks(pdfBuffer, 3);
   
   if (chunks.length === 0) {
     throw new AppError('No text could be extracted from the PDF', 400);
