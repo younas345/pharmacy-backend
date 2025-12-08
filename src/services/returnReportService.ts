@@ -1923,6 +1923,30 @@ export const getReturnReportsByDistributorAndNdc = async (
     });
   });
 
+  // For each date group, keep only the record with the highest pricePerUnit
+  groupedByDate.forEach((group, dateKey) => {
+    if (group.records.length > 1) {
+      // Find the record with the maximum pricePerUnit
+      let maxPricePerUnit = -Infinity;
+      let bestRecord = group.records[0];
+
+      group.records.forEach((record) => {
+        const pricePerUnit = Number(record.data?.pricePerUnit) || 0;
+        if (pricePerUnit > maxPricePerUnit) {
+          maxPricePerUnit = pricePerUnit;
+          bestRecord = record;
+        }
+      });
+
+      // Keep only the best record (the one with highest pricePerUnit)
+      group.records = [bestRecord];
+      group.count = 1;
+    } else if (group.records.length === 1) {
+      // Only one record, keep count as 1
+      group.count = 1;
+    }
+  });
+
   // Convert map to array and sort by report date (most recent first, null dates last)
   const results = Array.from(groupedByDate.values()).sort((a, b) => {
     if (a.reportDate === null && b.reportDate === null) return 0;
