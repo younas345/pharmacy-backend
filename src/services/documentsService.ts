@@ -199,6 +199,20 @@ export const createDocument = async (input: CreateDocumentInput): Promise<Upload
 
   const db = supabaseAdmin;
 
+  // Validate pharmacy_id exists before creating document
+  const { data: pharmacy, error: pharmacyError } = await db
+    .from('pharmacy')
+    .select('id')
+    .eq('id', input.pharmacy_id)
+    .single();
+
+  if (pharmacyError || !pharmacy) {
+    throw new AppError(
+      `Pharmacy with ID ${input.pharmacy_id} does not exist. Please provide a valid pharmacy_id.`,
+      400
+    );
+  }
+
   const documentData = {
     pharmacy_id: input.pharmacy_id,
     file_name: input.file_name,

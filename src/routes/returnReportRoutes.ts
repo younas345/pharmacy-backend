@@ -285,7 +285,7 @@ router.post('/process', upload.single('file'), processReturnReportHandler);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.get('/search', getReturnReportsByDistributorAndNdcHandler);
+router.get('/search', getReturnReportsByDistributorAndNdcHandler as any);
 
 export default router;
 

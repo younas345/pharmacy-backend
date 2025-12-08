@@ -549,7 +549,22 @@ export const getOptimizationRecommendations = async (
     const pricingData = ndcPricingMap[ndc] || [];
 
     if (pricingData.length === 0) {
-      // No pricing data found for this NDC
+      // No pricing data found for this NDC - still return recommendation with default values
+      recommendations.push({
+        id: productItem.id,
+        ndc,
+        productName: productItem.product_name || `Product ${ndc}`,
+        quantity: productItem.quantity || 1,
+        lotNumber: productItem.lot_number || undefined,
+        expirationDate: productItem.expiration_date || undefined,
+        recommendedDistributor: '', // Empty recommended distributor field
+        recommendedDistributorContact: undefined,
+        expectedPrice: 0, // Default 0 price
+        worstPrice: 0, // Default 0 price
+        alternativeDistributors: [], // Empty alternatives
+        savings: 0, // Default 0 savings
+        available: true,
+      });
       return;
     }
 
@@ -601,6 +616,22 @@ export const getOptimizationRecommendations = async (
       }));
 
     if (distributorAverages.length === 0) {
+      // No distributor averages - still return recommendation with default values
+      recommendations.push({
+        id: productItem.id,
+        ndc,
+        productName: productItem.product_name || `Product ${ndc}`,
+        quantity: productItem.quantity || 1,
+        lotNumber: productItem.lot_number || undefined,
+        expirationDate: productItem.expiration_date || undefined,
+        recommendedDistributor: '', // Empty recommended distributor field
+        recommendedDistributorContact: undefined,
+        expectedPrice: 0, // Default 0 price
+        worstPrice: 0, // Default 0 price
+        alternativeDistributors: [], // Empty alternatives
+        savings: 0, // Default 0 savings
+        available: true,
+      });
       return;
     }
 
