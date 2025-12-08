@@ -1,5 +1,5 @@
 import express from 'express';
-import { processReturnReportHandler } from '../controllers/returnReportController';
+import { processReturnReportHandler, getReturnReportsByDistributorAndNdcHandler } from '../controllers/returnReportController';
 import { upload } from '../middleware/upload';
 
 const router = express.Router();
@@ -96,6 +96,196 @@ const router = express.Router();
  *               message: Failed to extract structured data from PDF
  */
 router.post('/process', upload.single('file'), processReturnReportHandler);
+
+/**
+ * @swagger
+ * /api/return-reports/search:
+ *   get:
+ *     summary: Get matching return report records by distributor ID and NDC code
+ *     description: Retrieves all return report records that match the specified distributor ID and NDC code, grouped by report date
+ *     tags: [Return Reports]
+ *     parameters:
+ *       - in: query
+ *         name: distributor_id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Reverse distributor ID
+ *         example: "123e4567-e89b-12d3-a456-426614174000"
+ *       - in: query
+ *         name: ndc_code
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: NDC code to search for
+ *         example: "65862-0218-60"
+ *       - in: query
+ *         name: format
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [graph, default]
+ *           default: default
+ *         description: Response format - 'graph' for chart-friendly format, 'default' for grouped format
+ *     responses:
+ *       200:
+ *         description: Return reports retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Return reports retrieved successfully
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       reportDate:
+ *                         type: string
+ *                         format: date
+ *                         nullable: true
+ *                         example: "2025-04-01"
+ *                       ndcCode:
+ *                         type: string
+ *                         example: "65862-0218-60"
+ *                       count:
+ *                         type: integer
+ *                         example: 5
+ *                       records:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             id:
+ *                               type: string
+ *                               format: uuid
+ *                             document_id:
+ *                               type: string
+ *                               format: uuid
+ *                             pharmacy_id:
+ *                               type: string
+ *                               format: uuid
+ *                             data:
+ *                               type: object
+ *                               description: Return report item data (NDC code, item name, quantity, credit amount, etc.)
+ *                             report_date:
+ *                               type: string
+ *                               format: date
+ *                               nullable: true
+ *                             created_at:
+ *                               type: string
+ *                               format: date-time
+ *                 totalMatches:
+ *                   type: integer
+ *                   description: Total number of matching records across all report dates
+ *                   example: 10
+ *       200 (graph format):
+ *         description: Return reports retrieved successfully in graph format
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Return reports retrieved successfully in graph format
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     ndcCode:
+ *                       type: string
+ *                       example: "21922-0016-05"
+ *                     itemName:
+ *                       type: string
+ *                       example: "Clobetasol 0.05% Topical Cream"
+ *                     dataPoints:
+ *                       type: array
+ *                       description: Array of data points sorted chronologically by report date
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           date:
+ *                             type: string
+ *                             format: date
+ *                             example: "2025-09-04"
+ *                           pricePerUnit:
+ *                             type: number
+ *                             example: 10.88
+ *                           quantity:
+ *                             type: number
+ *                             example: 1
+ *                           creditAmount:
+ *                             type: number
+ *                             example: 10.88
+ *                           recordId:
+ *                             type: string
+ *                             format: uuid
+ *                           itemName:
+ *                             type: string
+ *                           expirationDate:
+ *                             type: string
+ *                           lotNumber:
+ *                             type: string
+ *                     summary:
+ *                       type: object
+ *                       properties:
+ *                         totalRecords:
+ *                           type: integer
+ *                         dateRange:
+ *                           type: object
+ *                           properties:
+ *                             earliest:
+ *                               type: string
+ *                               format: date
+ *                             latest:
+ *                               type: string
+ *                               format: date
+ *                         priceStats:
+ *                           type: object
+ *                           properties:
+ *                             min:
+ *                               type: number
+ *                             max:
+ *                               type: number
+ *                             average:
+ *                               type: number
+ *                         totalQuantity:
+ *                           type: number
+ *                         totalCreditAmount:
+ *                           type: number
+ *       400:
+ *         description: Bad request - missing required query parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               missingDistributorId:
+ *                 value:
+ *                   status: fail
+ *                   message: distributor_id query parameter is required
+ *               missingNdcCode:
+ *                 value:
+ *                   status: fail
+ *                   message: ndc_code query parameter is required
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get('/search', getReturnReportsByDistributorAndNdcHandler);
 
 export default router;
 

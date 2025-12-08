@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { processReturnReport, saveReturnReport } from '../services/returnReportService';
+import { processReturnReport, saveReturnReport, getReturnReportsByDistributorAndNdc, transformToGraphFormat } from '../services/returnReportService';
 import { createDocument, uploadFileToStorage } from '../services/documentsService';
 import { findOrCreateReverseDistributor } from '../services/reverseDistributorsService';
 import { catchAsync } from '../utils/catchAsync';
@@ -124,6 +124,42 @@ export const processReturnReportHandler = catchAsync(
       message: 'Return report processed successfully',
       data: structuredData,
       document: savedDocument, // Include saved document info
+    });
+  }
+);
+
+export const getReturnReportsByDistributorAndNdcHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const distributorId = req.query.distributor_id as string;
+    const ndcCode = req.query.ndc_code as string;
+    const format = req.query.format as string | undefined; // Optional: 'graph' or default
+
+    if (!distributorId) {
+      throw new AppError('distributor_id query parameter is required', 400);
+    }
+
+    if (!ndcCode) {
+      throw new AppError('ndc_code query parameter is required', 400);
+    }
+
+    const results = await getReturnReportsByDistributorAndNdc(distributorId, ndcCode);
+
+    // If format=graph is requested, return graph format
+    if (format === 'graph') {
+      const graphData = transformToGraphFormat(results);
+      return res.status(200).json({
+        status: 'success',
+        message: 'Return reports retrieved successfully in graph format',
+        data: graphData,
+      });
+    }
+
+    // Default format (original format)
+    res.status(200).json({
+      status: 'success',
+      message: 'Return reports retrieved successfully',
+      data: results,
+      totalMatches: results.reduce((sum, group) => sum + group.count, 0),
     });
   }
 );
