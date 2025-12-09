@@ -2,23 +2,112 @@ import express from 'express';
 import dotenv from 'dotenv';
 import swaggerUi from 'swagger-ui-express';
 import authRoutes from './routes/authRoutes';
+import returnReportRoutes from './routes/returnReportRoutes';
+import inventoryRoutes from './routes/inventoryRoutes';
+import returnsRoutes from './routes/returnsRoutes';
+import productsRoutes from './routes/productsRoutes';
+import productListsRoutes from './routes/productListsRoutes';
+import dashboardRoutes from './routes/dashboardRoutes';
+import creditsRoutes from './routes/creditsRoutes';
+import documentsRoutes from './routes/documentsRoutes';
+import barcodeRoutes from './routes/barcodeRoutes';
+import optimizationRoutes from './routes/optimizationRoutes';
+import distributorsRoutes from './routes/distributorsRoutes';
+import subscriptionRoutes from './routes/subscriptionRoutes';
+import settingsRoutes from './routes/settingsRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
+import cors from 'cors';
 
-dotenv.config({ path: '.env.local' });
+// Load environment variables
+// Vercel provides env vars directly, so only load .env.local in development
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  dotenv.config({ path: '.env.local' });
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// CORS Configuration
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  'https://pharmacy-ui-75vl.vercel.app', // Without trailing slash
+  'https://pharmacy-ui-75vl.vercel.app/', // With trailing slash (for safety)
+  process.env.FRONTEND_URL,
+].filter(Boolean) as string[];
+
+// Normalize origin by removing trailing slash for comparison
+const normalizeOrigin = (origin: string): string => {
+  return origin.replace(/\/$/, '');
+};
+
+app.use(cors({
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow requests with no origin (like mobile apps, Postman, or curl)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // Normalize the origin (remove trailing slash)
+    const normalizedOrigin = normalizeOrigin(origin);
+    
+    // Always allow localhost origins (for local development)
+    if (normalizedOrigin.includes('localhost') || normalizedOrigin.includes('127.0.0.1')) {
+      return callback(null, true);
+    }
+    
+    // Check if normalized origin is in allowed list (also normalize allowed origins for comparison)
+    const normalizedAllowedOrigins = allowedOrigins.map(normalizeOrigin);
+    if (normalizedAllowedOrigins.includes(normalizedOrigin)) {
+      return callback(null, true);
+    }
+    
+    // If origin is not in allowed list, block it
+    console.warn(`CORS blocked origin: ${origin} (normalized: ${normalizedOrigin})`);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true, // Allow cookies/auth headers
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+  ],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400, // 24 hours
+}));
 
 // Swagger Documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
+// Webhook route (must be before JSON middleware to get raw body)
+import { handleWebhook } from './controllers/webhookController';
+app.post('/api/subscriptions/webhook', express.raw({ type: 'application/json' }), handleWebhook);
+
+// Middleware (after webhook route)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/return-reports', returnReportRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/returns', returnsRoutes);
+app.use('/api/products', productsRoutes);
+app.use('/api/product-lists', productListsRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/credits', creditsRoutes);
+app.use('/api/documents', documentsRoutes);
+app.use('/api/barcode', barcodeRoutes);
+app.use('/api/optimization', optimizationRoutes);
+app.use('/api/distributors', distributorsRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/settings', settingsRoutes);
 
 /**
  * @swagger
@@ -51,8 +140,14 @@ app.get('/health', (req, res) => {
 // Global error handler (must be last)
 app.use(globalErrorHandler);
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Swagger documentation available at http://localhost:${PORT}/api-docs`);
-});
+// Export app for Vercel serverless functions
+export default app;
+
+// Only start server if not running on Vercels
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`Swagger documentation available at http://localhost:${PORT}/api-docs`);
+  });
+}
 
