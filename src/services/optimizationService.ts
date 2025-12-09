@@ -119,7 +119,7 @@ export const getOptimizationRecommendations = async (
 
   // Step 3: Search return_reports for matching NDCs
   // Join with uploaded_documents and reverse_distributors to get distributor name
-  const { data: returnReports, error: reportsError } = await db
+  let returnReportsQuery = db
     .from('return_reports')
     .select(`
       id,
@@ -136,6 +136,42 @@ export const getOptimizationRecommendations = async (
         )
       )
     `);
+
+  // In search mode, filter by NDC at database level for better performance
+  // Use ilike for partial matching (similar to SQL LIKE) to catch all variations
+  if (isSearchMode && searchNdcs && searchNdcs.length > 0) {
+    // Build OR conditions for each search NDC
+    // Match both with dashes and without dashes using ilike for partial matching
+    const orConditions: string[] = [];
+    searchNdcs.forEach(searchNdc => {
+      const normalized = String(searchNdc).replace(/-/g, '').trim();
+      const withDashes = String(searchNdc).trim();
+      
+      // Use ilike for partial matching (like SQL LIKE '%pattern%')
+      // For JSONB fields, use the correct PostgREST syntax
+      // This will match: "00456-0460-01", "00456046001", "00456-0460-01-extra", etc.
+      orConditions.push(`data->>ndcCode.ilike.%${withDashes}%`);
+      if (normalized !== withDashes) {
+        orConditions.push(`data->>ndcCode.ilike.%${normalized}%`);
+      }
+      
+      // Also try matching 'ndc' field if it exists
+      orConditions.push(`data->>ndc.ilike.%${withDashes}%`);
+      if (normalized !== withDashes) {
+        orConditions.push(`data->>ndc.ilike.%${normalized}%`);
+      }
+    });
+    
+    // Use OR to match any of the conditions
+    if (orConditions.length > 0) {
+      returnReportsQuery = returnReportsQuery.or(orConditions.join(','));
+      console.log(`🔍 Filtering return_reports by NDC at database level (partial match)`);
+      console.log(`   Search NDCs:`, searchNdcs);
+      console.log(`   OR conditions:`, orConditions);
+    }
+  }
+
+  const { data: returnReports, error: reportsError } = await returnReportsQuery;
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
@@ -170,6 +206,9 @@ export const getOptimizationRecommendations = async (
   }
 
   console.log(`📦 Found ${returnReports?.length || 0} return report records`);
+  if (isSearchMode) {
+    console.log(`🔍 Database query filtered by NDC - should only return matching records`);
+  }
   console.log(`🔍 Looking for NDCs:`, ndcs);
   if (isSearchMode && searchNdcs) {
     console.log(`🔍 Original search NDCs (from query param):`, searchNdcs);
@@ -225,6 +264,7 @@ export const getOptimizationRecommendations = async (
   // Each return_reports record contains a single item in the data field
   if (isSearchMode) {
     console.log(`\n=== PROCESSING RETURN REPORTS FOR SEARCH MODE ===`);
+    console.log(`📊 Total return reports to process: ${returnReports?.length || 0}`);
   }
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
@@ -234,13 +274,15 @@ export const getOptimizationRecommendations = async (
       console.log(`   Data keys:`, data ? Object.keys(data) : 'null');
       console.log(`   Data.ndcCode:`, data?.ndcCode);
       console.log(`   Data.ndc:`, data?.ndc);
+      console.log(`   Full data:`, JSON.stringify(data, null, 2).substring(0, 500));
     }
     
     // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
-    const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
+    // Normalize by trimming to ensure consistent matching
+    const distributorName = (report.uploaded_documents?.reverse_distributors?.name || 
                            data?.reverseDistributor || 
                            data?.reverseDistributorInfo?.name ||
-                           'Unknown Distributor';
+                           'Unknown Distributor').trim();
     
     // Debug: Log distributor extraction
     console.log(`🔍 Report ${report.id}: distributor = "${distributorName}"`);
@@ -259,22 +301,50 @@ export const getOptimizationRecommendations = async (
       if (Array.isArray(data.items)) {
         // Legacy format with items array
         items = data.items;
+        if (isSearchMode) {
+          console.log(`   📋 Found items array with ${items.length} items`);
+        }
       } else if (data.items && typeof data.items === 'object' && !Array.isArray(data.items)) {
         // Single item object in items field
         items = [data.items];
+        if (isSearchMode) {
+          console.log(`   📋 Found single item object in items field`);
+        }
       } else if (data.ndcCode || data.ndc) {
         // Data itself is an item (current format - most common)
         items = [data];
+        if (isSearchMode) {
+          console.log(`   📋 Data itself is an item (has ndcCode or ndc)`);
+        }
+      } else {
+        if (isSearchMode) {
+          console.log(`   ⚠️ Could not extract items from data structure. Data type: ${typeof data}, keys: ${data ? Object.keys(data).join(', ') : 'null'}`);
+        }
+      }
+    } else {
+      if (isSearchMode) {
+        console.log(`   ⚠️ Data is not an object or is null`);
       }
     }
+    
+    if (isSearchMode) {
+      console.log(`   📦 Extracted ${items.length} items from report ${report.id}`);
+    }
 
-    items.forEach((item: any) => {
+    items.forEach((item: any, itemIndex: number) => {
       // Try different possible field names for NDC
       const ndcCode = item.ndcCode || item.ndc;
       
+      if (isSearchMode) {
+        console.log(`   📦 Processing item ${itemIndex + 1}/${items.length}`);
+        console.log(`   Item keys:`, Object.keys(item || {}));
+        console.log(`   Item.ndcCode:`, item.ndcCode);
+        console.log(`   Item.ndc:`, item.ndc);
+      }
+      
       if (!ndcCode) {
         if (isSearchMode) {
-          console.log(`⚠️ No NDC found in item. Item keys:`, Object.keys(item || {}));
+          console.log(`   ⚠️ No NDC found in item ${itemIndex + 1}. Item keys:`, Object.keys(item || {}));
         }
         return;
       }
@@ -284,7 +354,7 @@ export const getOptimizationRecommendations = async (
       
       // Debug logging for search mode
       if (isSearchMode) {
-        console.log(`🔍 Checking NDC: "${ndcCode}" (normalized: "${normalizedNdcCode}") against search terms:`, ndcs);
+        console.log(`   🔍 Checking NDC: "${ndcCode}" (normalized: "${normalizedNdcCode}") against search terms:`, ndcs);
       }
       
       // Find matching NDC from product list or search terms
@@ -383,6 +453,11 @@ export const getOptimizationRecommendations = async (
           quantity,
         });
         
+        if (isSearchMode) {
+          console.log(`   ✅ Added to pricing map: NDC=${actualNdcKey}, Distributor="${distributorName}", Price=${pricePerUnit}, Quantity=${quantity}`);
+          console.log(`   📊 Total entries in pricing map for ${actualNdcKey}: ${ndcPricingMap[actualNdcKey].length}`);
+        }
+        
         // Track latest price per NDC based on report_date (apply to all modes)
         // Get report_date (prefer report_date, then uploaded_at, then created_at)
         const reportDate = report.uploaded_documents?.report_date;
@@ -409,11 +484,19 @@ export const getOptimizationRecommendations = async (
           if (isSearchMode) {
             console.log(`   💰 Latest price for ${distributorName}|${actualNdcKey}: ${pricePerUnit} (report_date: ${reportDate || 'N/A'})`);
           }
+        } else {
+          if (isSearchMode) {
+            console.log(`   ℹ️ Latest price already set for ${distributorNdcKey}: ${distributorNdcToLatestPriceMap[distributorNdcKey]} (skipping this record)`);
+          }
         }
         
         console.log(`✅ Matched NDC ${actualNdcKey} (search term: ${matchingNdc}) with distributor "${distributorName}", price: ${pricePerUnit}`);
       } else {
-        console.log(`❌ Skipped NDC ${actualNdcKey} - invalid price: ${pricePerUnit}`);
+        if (isSearchMode) {
+          console.log(`   ❌ Skipped NDC ${actualNdcKey} - invalid price: ${pricePerUnit} (creditAmount: ${creditAmount}, quantity: ${quantity})`);
+        } else {
+          console.log(`❌ Skipped NDC ${actualNdcKey} - invalid price: ${pricePerUnit}`);
+        }
       }
     });
   });
@@ -625,6 +708,7 @@ export const getOptimizationRecommendations = async (
           // Fallback to average if latest not found (shouldn't happen, but safety fallback)
           price = data.totalPrice / data.count;
           console.log(`   ⚠️ Latest price not found for ${distributorName}|${ndc}, using average: ${price}`);
+          console.log(`   🔍 Available keys in latestPriceMap:`, Object.keys(distributorNdcToLatestPriceMap).filter(k => k.includes(distributorName) || k.includes(ndc)));
         }
         
         return {
@@ -632,6 +716,9 @@ export const getOptimizationRecommendations = async (
           price,
         };
       });
+    
+    // Debug: Log all distributor averages
+    console.log(`📊 Distributor averages for NDC ${ndc}:`, distributorAverages.map(d => `${d.name}: ${d.price}`).join(', '));
 
     if (distributorAverages.length === 0) {
       // No distributor averages - still return recommendation with default values
@@ -811,8 +898,13 @@ export const getOptimizationRecommendations = async (
   // Now update recommendations: select highest price distributor as recommended (no availability check)
   recommendations.forEach((rec) => {
     if (!rec._distributorAverages || rec._distributorAverages.length === 0) {
+      console.log(`⚠️ No distributor averages for NDC ${rec.ndc} - skipping recommendation update`);
       return;
     }
+
+    console.log(`\n🔧 Building recommendations for NDC ${rec.ndc}`);
+    console.log(`   Total distributors in _distributorAverages: ${rec._distributorAverages.length}`);
+    console.log(`   Distributors:`, rec._distributorAverages.map(d => `${d.name} (${d.price})`).join(', '));
 
     // COMMENTED OUT: Find the highest price distributor that IS available
     // Now just use the highest price distributor (first one since already sorted)
@@ -842,6 +934,7 @@ export const getOptimizationRecommendations = async (
     // CHANGED: Just use the highest price distributor (first one since sorted by price desc)
     if (rec._distributorAverages.length > 0) {
       recommended = rec._distributorAverages[0]; // Highest price distributor
+      console.log(`   ✅ Recommended distributor: ${recommended.name} (price: ${recommended.price})`);
     }
 
     // Now build alternatives list (all distributors except the recommended one)
@@ -860,8 +953,12 @@ export const getOptimizationRecommendations = async (
             // COMMENTED OUT: available: distributorAvailabilityMap[dist.name] ?? false,
             available: true, // Always mark as available since we're not checking
           });
+          console.log(`   ➕ Added alternative: ${dist.name} (price: ${dist.price}, difference: ${dist.price - recommended!.price})`);
         }
       });
+      console.log(`   📋 Total alternatives: ${alternatives.length}`);
+    } else {
+      console.log(`   ⚠️ No recommended distributor found`);
     }
 
     if (recommended) {
