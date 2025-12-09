@@ -147,6 +147,22 @@ interface SupabaseErrorResponse {
   [key: string]: any;
 }
 
+/**
+ * Refresh access token using refresh token
+ * 
+ * IMPORTANT: Refresh tokens should have a longer expiration than access tokens.
+ * - Access tokens typically expire in 1 hour
+ * - Refresh tokens should expire in 7 days (default Supabase configuration)
+ * 
+ * If refresh tokens are expiring at the same time as access tokens, check your
+ * Supabase project settings:
+ * - Go to Supabase Dashboard > Authentication > Settings
+ * - Verify "JWT expiry" and "Refresh token expiry" settings
+ * - Refresh token expiry should be significantly longer than JWT expiry
+ * 
+ * This function exchanges a refresh token for a new access token and refresh token.
+ * The new refresh token should be used for subsequent refreshes.
+ */
 export const refreshToken = async (data: RefreshTokenData): Promise<AuthResponse> => {
   const { refreshToken: refreshTokenValue } = data;
 
@@ -156,6 +172,7 @@ export const refreshToken = async (data: RefreshTokenData): Promise<AuthResponse
 
   // Use Supabase REST API to refresh the token
   // This is the proper way to refresh tokens server-side
+  // The refresh token should remain valid even after the access token expires
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
@@ -165,6 +182,7 @@ export const refreshToken = async (data: RefreshTokenData): Promise<AuthResponse
 
   try {
     // Call Supabase Auth REST API to exchange refresh token for new session
+    // The refresh token should remain valid even after access token expires
     const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
       method: 'POST',
       headers: {
@@ -179,7 +197,13 @@ export const refreshToken = async (data: RefreshTokenData): Promise<AuthResponse
 
     if (!response.ok) {
       const errorData = (await response.json().catch(() => ({}))) as SupabaseErrorResponse;
-      throw new AppError(errorData.error_description || errorData.error || 'Invalid or expired refresh token', 401);
+      const errorMessage = errorData.error_description || errorData.error || 'Invalid or expired refresh token';
+      
+      // Provide more specific error message
+      if (errorData.error === 'invalid_grant' || errorMessage.includes('expired')) {
+        throw new AppError('Refresh token has expired. Please sign in again.', 401);
+      }
+      throw new AppError(errorMessage, 401);
     }
 
     const sessionData = (await response.json()) as SupabaseTokenResponse;
@@ -201,10 +225,21 @@ export const refreshToken = async (data: RefreshTokenData): Promise<AuthResponse
       throw new AppError('Pharmacy profile not found', 404);
     }
 
+    // Supabase should always return a new refresh token when refreshing
+    // Use the new refresh token, not the old one
+    // This ensures the refresh token remains valid for its full lifetime
+    const newRefreshToken = sessionData.refresh_token;
+    
+    if (!newRefreshToken) {
+      // If Supabase doesn't return a new refresh token, log a warning but continue
+      // This should not happen in normal operation
+      console.warn('Supabase did not return a new refresh token. Using the provided refresh token as fallback.');
+    }
+
     // Construct session object in the format expected by the client
     const session = {
       access_token: sessionData.access_token,
-      refresh_token: sessionData.refresh_token || refreshTokenValue,
+      refresh_token: newRefreshToken || refreshTokenValue,
       expires_in: sessionData.expires_in,
       expires_at: sessionData.expires_at,
       token_type: sessionData.token_type || 'bearer',
@@ -214,14 +249,18 @@ export const refreshToken = async (data: RefreshTokenData): Promise<AuthResponse
     return {
       user: pharmacyData,
       token: sessionData.access_token,
-      refreshToken: sessionData.refresh_token || refreshTokenValue,
+      // Always use the new refresh token if provided, otherwise fallback to the old one
+      // This ensures refresh tokens can be used multiple times until they expire
+      refreshToken: newRefreshToken || refreshTokenValue,
       session,
     };
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
     }
-    throw new AppError('Failed to refresh token', 401);
+    // Provide more descriptive error message
+    const errorMessage = error instanceof Error ? error.message : 'Failed to refresh token';
+    throw new AppError(`Failed to refresh token: ${errorMessage}`, 401);
   }
 };
 

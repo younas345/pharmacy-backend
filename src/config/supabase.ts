@@ -16,7 +16,14 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // Client with anon key (subject to RLS policies)
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Note: We handle token refresh manually through our API endpoints
+// so we disable auto-refresh to have full control over token lifecycle
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: false, // We handle refresh manually via /api/auth/refresh
+    persistSession: false, // Server-side doesn't need session persistence
+  },
+});
 
 // Client with service role key (bypasses RLS - use for admin operations)
 export const supabaseAdmin = supabaseServiceKey
