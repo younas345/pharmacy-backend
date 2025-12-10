@@ -133,12 +133,19 @@ CREATE TABLE IF NOT EXISTS product_list_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ndc VARCHAR(50) NOT NULL,
   product_name VARCHAR(500),
-  quantity INTEGER,
+  full_units INTEGER NOT NULL,
+  partial_units INTEGER NOT NULL,
   lot_number VARCHAR(100),
   expiration_date DATE,
   notes TEXT,
   added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  added_by UUID REFERENCES auth.users(id)
+  added_by UUID REFERENCES auth.users(id),
+  CONSTRAINT product_list_items_units_check CHECK (
+    (full_units = 0 AND partial_units > 0) OR 
+    (full_units > 0 AND partial_units = 0)
+  ),
+  CONSTRAINT product_list_items_full_units_check CHECK (full_units >= 0),
+  CONSTRAINT product_list_items_partial_units_check CHECK (partial_units >= 0)
 );
 
 -- Inventory Items Table

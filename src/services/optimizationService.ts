@@ -2025,18 +2025,20 @@ export const getDistributorSuggestionsByNdc = async (
   const normalizedNdc = ndc.trim();
   const normalizedNdcForSearch = normalizedNdc.replace(/-/g, '').trim();
 
-  // Step 1: Check if pharmacy has the required quantity in product_list_items
+  // Step 1: Check if pharmacy has the product in product_list_items
+  // Note: Since quantity field has been removed and replaced with full_units and partial_units,
+  // we now only check if the product exists, not the quantity
   const { data: productItems, error: itemsError } = await db
     .from('product_list_items')
-    .select('ndc, quantity')
+    .select('ndc, full_units, partial_units')
     .eq('added_by', pharmacyId);
 
   if (itemsError) {
     throw new AppError(`Failed to fetch product list items: ${itemsError.message}`, 400);
   }
 
-  // Calculate total available quantity for this NDC
-  let availableQuantity = 0;
+  // Check if product exists in the list (quantity tracking removed)
+  let productExists = false;
   if (productItems && productItems.length > 0) {
     productItems.forEach((item) => {
       const itemNdc = String(item.ndc).trim();
@@ -2049,12 +2051,15 @@ export const getDistributorSuggestionsByNdc = async (
         itemNdc === normalizedNdcForSearch ||
         normalizedItemNdc === normalizedNdc
       ) {
-        availableQuantity += item.quantity || 0;
+        productExists = true;
       }
     });
   }
 
-  const hasEnoughQuantity = availableQuantity >= quantity;
+  // Since we no longer track quantity, we set availableQuantity to 1 if product exists, 0 otherwise
+  // This maintains backward compatibility with the response interface
+  const availableQuantity = productExists ? 1 : 0;
+  const hasEnoughQuantity = productExists; // Product exists means it's available
 
   // If pharmacy doesn't have enough quantity, return error immediately
   if (!hasEnoughQuantity) {

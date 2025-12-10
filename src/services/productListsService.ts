@@ -5,7 +5,8 @@ export interface ProductListItem {
   id: string;
   ndc: string;
   product_name: string;
-  quantity: number;
+  full_units: number;
+  partial_units: number;
   lot_number?: string;
   expiration_date?: string;
   notes?: string;
@@ -19,7 +20,8 @@ export const addProductListItem = async (
   item: {
     ndc: string;
     product_name: string;
-    quantity: number;
+    full_units: number;
+    partial_units: number;
     lot_number?: string;
     expiration_date?: string;
     notes?: string;
@@ -35,7 +37,8 @@ export const addProductListItem = async (
     pharmacy_id: pharmacyId,
     ndc: item.ndc,
     product_name: item.product_name,
-    quantity: item.quantity,
+    full_units: item.full_units,
+    partial_units: item.partial_units,
   });
 
   const { data, error } = await db
@@ -43,13 +46,14 @@ export const addProductListItem = async (
     .insert({
       ndc: item.ndc,
       product_name: item.product_name,
-      quantity: item.quantity,
+      full_units: item.full_units,
+      partial_units: item.partial_units,
       lot_number: item.lot_number,
       expiration_date: item.expiration_date,
       notes: item.notes,
       added_by: pharmacyId,
     })
-    .select('id, ndc, product_name, quantity, lot_number, expiration_date, notes, added_at, added_by')
+    .select('id, ndc, product_name, full_units, partial_units, lot_number, expiration_date, notes, added_at, added_by')
     .single();
 
   if (error) {
@@ -90,7 +94,7 @@ export const getProductListItems = async (pharmacyId: string): Promise<ProductLi
   // Get all items for this pharmacy (filtered by added_by)
   const { data: items, error } = await db
     .from('product_list_items')
-    .select('id, ndc, product_name, quantity, lot_number, expiration_date, notes, added_at, added_by')
+    .select('id, ndc, product_name, full_units, partial_units, lot_number, expiration_date, notes, added_at, added_by')
     .eq('added_by', pharmacyId)
     .order('added_at', { ascending: false });
 
@@ -115,43 +119,7 @@ export const getProductListItems = async (pharmacyId: string): Promise<ProductLi
 
   const packageIds = (packages || []).map((pkg: any) => pkg.id);
 
-  // Get all package items for these packages, grouped by NDC
-  let packageItemsByNdc: Record<string, number> = {};
-  
-  if (packageIds.length > 0) {
-    const { data: packageItems, error: packageItemsError } = await db
-      .from('custom_package_items')
-      .select('ndc, quantity')
-      .in('package_id', packageIds);
-
-    if (packageItemsError) {
-      throw new AppError(`Failed to fetch package items: ${packageItemsError.message}`, 400);
-    }
-
-    // Sum quantities by NDC
-    (packageItems || []).forEach((item: any) => {
-      const ndc = item.ndc;
-      const quantity = item.quantity || 0;
-      if (packageItemsByNdc[ndc]) {
-        packageItemsByNdc[ndc] += quantity;
-      } else {
-        packageItemsByNdc[ndc] = quantity;
-      }
-    });
-  }
-
-  // Decrease quantities based on packages
-  const adjustedItems = items.map((item) => {
-    const usedQuantity = packageItemsByNdc[item.ndc] || 0;
-    const adjustedQuantity = Math.max(0, item.quantity - usedQuantity);
-    
-    return {
-      ...item,
-      quantity: adjustedQuantity,
-    };
-  });
-
-  return adjustedItems;
+  return items;
 };
 
 // Update product list item
@@ -161,7 +129,8 @@ export const updateProductListItem = async (
   updates: {
     ndc?: string;
     product_name?: string;
-    quantity?: number;
+    full_units?: number;
+    partial_units?: number;
     lot_number?: string;
     expiration_date?: string;
     notes?: string;
@@ -176,7 +145,7 @@ export const updateProductListItem = async (
   // First, verify the item exists and belongs to the pharmacy
   const { data: existingItem, error: fetchError } = await db
     .from('product_list_items')
-    .select('id, added_by')
+    .select('id, added_by, full_units, partial_units')
     .eq('id', itemId)
     .single();
 
@@ -192,10 +161,24 @@ export const updateProductListItem = async (
   const updateData: any = {};
   if (updates.ndc !== undefined) updateData.ndc = updates.ndc;
   if (updates.product_name !== undefined) updateData.product_name = updates.product_name;
-  if (updates.quantity !== undefined) updateData.quantity = updates.quantity;
   if (updates.lot_number !== undefined) updateData.lot_number = updates.lot_number;
   if (updates.expiration_date !== undefined) updateData.expiration_date = updates.expiration_date;
   if (updates.notes !== undefined) updateData.notes = updates.notes;
+
+  // Handle full_units and partial_units updates
+  // If either is being updated, we need to ensure one is 0 and the other is > 0
+  if (updates.full_units !== undefined || updates.partial_units !== undefined) {
+    const newFullUnits = updates.full_units !== undefined ? updates.full_units : existingItem.full_units;
+    const newPartialUnits = updates.partial_units !== undefined ? updates.partial_units : existingItem.partial_units;
+
+    // Validate: one must be 0 and the other must be > 0
+    if (!((newFullUnits === 0 && newPartialUnits > 0) || (newFullUnits > 0 && newPartialUnits === 0))) {
+      throw new AppError('One of full_units or partial_units must be 0, and the other must be greater than 0', 400);
+    }
+
+    if (updates.full_units !== undefined) updateData.full_units = newFullUnits;
+    if (updates.partial_units !== undefined) updateData.partial_units = newPartialUnits;
+  }
 
   if (Object.keys(updateData).length === 0) {
     throw new AppError('No fields provided to update', 400);
@@ -210,7 +193,7 @@ export const updateProductListItem = async (
     .from('product_list_items')
     .update(updateData)
     .eq('id', itemId)
-    .select('id, ndc, product_name, quantity, lot_number, expiration_date, notes, added_at, added_by')
+    .select('id, ndc, product_name, full_units, partial_units, lot_number, expiration_date, notes, added_at, added_by')
     .single();
 
   if (error) {
