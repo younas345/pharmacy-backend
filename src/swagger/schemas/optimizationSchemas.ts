@@ -63,6 +63,18 @@ export const optimizationSchemas = {
         example: 13,
         description: 'Quantity of the product in the pharmacy list',
       },
+      full: {
+        type: 'number',
+        nullable: true,
+        example: 1,
+        description: 'Full units from return reports data',
+      },
+      partial: {
+        type: 'number',
+        nullable: true,
+        example: 0,
+        description: 'Partial units from return reports data',
+      },
       lotNumber: {
         type: 'string',
         nullable: true,

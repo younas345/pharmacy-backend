@@ -6,6 +6,8 @@ export interface OptimizationRecommendation {
   ndc: string;
   productName: string;
   quantity: number;
+  full?: number; // Full units from return reports
+  partial?: number; // Partial units from return reports
   lotNumber?: string;
   expirationDate?: string;
   recommendedDistributor: string;
@@ -142,7 +144,8 @@ export const getOptimizationRecommendations = async (
       expiration_date: item.expiration_date,
     }));
     
-    // Step 2: Extract unique NDCs
+    // Step 2: Extract unique NDCs from current pharmacy's product_list_items only
+    // IMPORTANT: Only NDCs from this pharmacy's inventory will be processed
     ndcs = [...new Set(productItems.map((item) => item.ndc))];
     
     // Build unit type map for each NDC based on inventory
@@ -175,6 +178,7 @@ export const getOptimizationRecommendations = async (
       data,
       document_id,
       created_at,
+      pharmacy_id,
       uploaded_documents (
         reverse_distributor_id,
         report_date,
@@ -185,6 +189,13 @@ export const getOptimizationRecommendations = async (
         )
       )
     `);
+
+  // In non-search mode, filter return_reports by current pharmacy_id
+  // This ensures full/partial values come only from the pharmacy's own records
+  if (!isSearchMode) {
+    returnReportsQuery = returnReportsQuery.eq('pharmacy_id', pharmacyId);
+    console.log(`🏥 Non-search mode: Filtering return_reports by pharmacy_id = ${pharmacyId}`);
+  }
 
   // In search mode, filter by NDC at database level for better performance
   // Use ilike for partial matching (similar to SQL LIKE) to catch all variations
@@ -266,6 +277,7 @@ export const getOptimizationRecommendations = async (
   }
 
   // Pre-create normalized NDC lookup for faster matching in non-search mode
+  // IMPORTANT: Only NDCs from current pharmacy's product_list_items are included
   const normalizedNdcLookup = new Map<string, string>();
   if (!isSearchMode) {
     ndcs.forEach(ndc => {
@@ -317,6 +329,12 @@ export const getOptimizationRecommendations = async (
   
   // Map to track quantities from return_reports (for search mode - always use from return_reports)
   const ndcToQuantityMap: Record<string, number> = {};
+  
+  // Map to track full units from return_reports
+  const ndcToFullMap: Record<string, number> = {};
+  
+  // Map to track partial units from return_reports
+  const ndcToPartialMap: Record<string, number> = {};
   
   // Map to track latest price per NDC from return_reports (for search mode - use latest not average)
   const ndcToLatestPriceMap: Record<string, number> = {};
@@ -537,6 +555,18 @@ export const getOptimizationRecommendations = async (
         if (!ndcPricingMap[actualNdcKey]) {
           ndcPricingMap[actualNdcKey] = [];
         }
+        
+        // Track full and partial from return_reports (use latest value, not sum)
+        // Store the latest full and partial values (since we sorted by report_date desc, first match is latest)
+        const itemFull = Number(item.full) || 0;
+        const itemPartial = Number(item.partial) || 0;
+        // Always update with latest value (first match is latest due to sorting)
+        if (ndcToFullMap[originalNdcFormat] === undefined) {
+          ndcToFullMap[originalNdcFormat] = itemFull;
+        }
+        if (ndcToPartialMap[originalNdcFormat] === undefined) {
+          ndcToPartialMap[originalNdcFormat] = itemPartial;
+        }
       } else {
         // Non-search mode: filter by unit type based on inventory
         if (ndcUnitTypeMap.size > 0) {
@@ -582,15 +612,18 @@ export const getOptimizationRecommendations = async (
         }
         
         // Exact match mode: use pre-computed lookup map for O(1) access
+        // IMPORTANT: normalizedNdcLookup only contains NDCs from current pharmacy's product_list_items
         matchingNdc = normalizedNdcLookup.get(normalizedNdcCode);
         
         if (!matchingNdc) {
           // Fallback to original matching logic for edge cases
-        matchingNdc = ndcs.find(n => {
+          // IMPORTANT: ndcs array only contains NDCs from current pharmacy's product_list_items
+          matchingNdc = ndcs.find(n => {
             return String(n).trim() === String(ndcCode).trim();
-        });
+          });
         }
         
+        // Only process if NDC matches one from current pharmacy's inventory
         if (!matchingNdc) {
           return;
         }
@@ -601,6 +634,18 @@ export const getOptimizationRecommendations = async (
       const quantity = Number(item.quantity) || 1;
       const creditAmount = Number(item.creditAmount) || 0;
       const pricePerUnit = Number(item.pricePerUnit) || (quantity > 0 && creditAmount > 0 ? creditAmount / quantity : 0);
+
+      // Track full and partial from return_reports (use latest value, not sum)
+      // Store the latest full and partial values (since we sorted by report_date desc, first match is latest)
+      const itemFull = Number(item.full) || 0;
+      const itemPartial = Number(item.partial) || 0;
+      // Always update with latest value (first match is latest due to sorting)
+      if (ndcToFullMap[actualNdcKey] === undefined) {
+        ndcToFullMap[actualNdcKey] = itemFull;
+      }
+      if (ndcToPartialMap[actualNdcKey] === undefined) {
+        ndcToPartialMap[actualNdcKey] = itemPartial;
+      }
 
       if (pricePerUnit > 0) {
         ndcPricingMap[actualNdcKey].push({
@@ -779,9 +824,73 @@ export const getOptimizationRecommendations = async (
     ndcs = [...new Set(Array.from(actualNdcToProduct.keys()))];
   }
 
+  // Helper function to get full/partial values for an NDC
+  // In search mode: Priority: return_reports data → inventory full_units/partial_units → 0
+  // In non-search mode: ONLY use inventory data from current pharmacy's product_list_items (never use return_reports data)
+  const getFullPartialForNdc = (ndc: string, productItem?: { full_units?: number; partial_units?: number }): { full: number; partial: number } => {
+    // In non-search mode, ONLY use inventory data from current pharmacy's product_list_items
+    // IMPORTANT: Never use return_reports data in non-search mode to ensure pharmacy-specific data
+    if (!isSearchMode) {
+      if (productItem) {
+        // Always use productItem data from current pharmacy's product_list_items
+        return {
+          full: productItem.full_units !== undefined ? productItem.full_units : 0,
+          partial: productItem.partial_units !== undefined ? productItem.partial_units : 0,
+        };
+      }
+      // If no productItem in non-search mode, return 0 (should not happen as productItem should always be provided)
+      return { full: 0, partial: 0 };
+    }
+    
+    // Search mode: Use return_reports data first, then fallback to inventory
+    // Try exact match first from return_reports data
+    if (ndcToFullMap[ndc] !== undefined || ndcToPartialMap[ndc] !== undefined) {
+      return {
+        full: ndcToFullMap[ndc] !== undefined ? ndcToFullMap[ndc] : 0,
+        partial: ndcToPartialMap[ndc] !== undefined ? ndcToPartialMap[ndc] : 0,
+      };
+    }
+    
+    // Try normalized version (without dashes)
+    const normalizedNdc = String(ndc).replace(/-/g, '').trim();
+    if (ndcToFullMap[normalizedNdc] !== undefined || ndcToPartialMap[normalizedNdc] !== undefined) {
+      return {
+        full: ndcToFullMap[normalizedNdc] !== undefined ? ndcToFullMap[normalizedNdc] : 0,
+        partial: ndcToPartialMap[normalizedNdc] !== undefined ? ndcToPartialMap[normalizedNdc] : 0,
+      };
+    }
+    
+    // Try all keys to find a match (fallback for different key formats)
+    for (const key in ndcToFullMap) {
+      const keyNormalized = String(key).replace(/-/g, '').trim();
+      const ndcNormalized = String(ndc).replace(/-/g, '').trim();
+      if (key === ndc || keyNormalized === ndcNormalized || key === normalizedNdc || keyNormalized === ndc) {
+        return {
+          full: ndcToFullMap[key] !== undefined ? ndcToFullMap[key] : 0,
+          partial: ndcToPartialMap[key] !== undefined ? ndcToPartialMap[key] : 0,
+        };
+      }
+    }
+    
+    // Fallback to inventory's full_units/partial_units if no return_reports data (search mode only)
+    if (productItem) {
+      return {
+        full: productItem.full_units !== undefined ? productItem.full_units : 0,
+        partial: productItem.partial_units !== undefined ? productItem.partial_units : 0,
+      };
+    }
+    
+    // Default: both 0
+    return { full: 0, partial: 0 };
+  };
+
+  // Build recommendations - only process items from current pharmacy's product_list_items
+  // Each productItem is already filtered by pharmacy_id (added_by = pharmacyId)
   productItems.forEach((productItem) => {
     const ndc = productItem.ndc;
+    // Only get pricing data for NDCs that match this pharmacy's inventory
     const pricingData = ndcPricingMap[ndc] || [];
+    const fullPartial = getFullPartialForNdc(ndc, productItem);
 
     if (pricingData.length === 0) {
       // No pricing data found for this NDC - still return recommendation with default values
@@ -792,6 +901,8 @@ export const getOptimizationRecommendations = async (
         ndc,
         productName: productItem.product_name || `Product ${ndc}`,
         quantity: quantity,
+        full: fullPartial.full,
+        partial: fullPartial.partial,
         lotNumber: productItem.lot_number || undefined,
         expirationDate: productItem.expiration_date || undefined,
         recommendedDistributor: '', // Empty recommended distributor field
@@ -886,6 +997,8 @@ export const getOptimizationRecommendations = async (
         ndc,
         productName: productItem.product_name || `Product ${ndc}`,
         quantity: quantity,
+        full: fullPartial.full,
+        partial: fullPartial.partial,
         lotNumber: productItem.lot_number || undefined,
         expirationDate: productItem.expiration_date || undefined,
         recommendedDistributor: '', // Empty recommended distributor field
@@ -925,6 +1038,8 @@ export const getOptimizationRecommendations = async (
       ndc,
       productName: productItem.product_name || `Product ${ndc}`,
       quantity: quantity,
+      full: fullPartial.full,
+      partial: fullPartial.partial,
       lotNumber: productItem.lot_number || undefined,
       expirationDate: productItem.expiration_date || undefined,
       recommendedDistributor: '', // Will be set after availability check
@@ -1532,6 +1647,7 @@ export const getPackageRecommendations = async (
 
   // Step 3: Get pricing data from return_reports
   // Join with uploaded_documents and reverse_distributors to get distributor name
+  // Filter by pharmacy_id to only get the pharmacy's own return reports
   const { data: returnReports, error: reportsError } = await db
     .from('return_reports')
     .select(`
@@ -1545,7 +1661,10 @@ export const getPackageRecommendations = async (
           name
         )
       )
-    `);
+    `)
+    .eq('pharmacy_id', pharmacyId);
+
+  console.log(`🏥 getPackageRecommendations: Filtering return_reports by pharmacy_id = ${pharmacyId}`);
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
@@ -2298,6 +2417,7 @@ export const getDistributorSuggestionsByNdc = async (
 
   // Step 3: Get pricing data from return_reports
   // Join with uploaded_documents and reverse_distributors to get distributor name
+  // Filter by pharmacy_id to only get the pharmacy's own return reports
   const { data: returnReports, error: reportsError } = await db
     .from('return_reports')
     .select(`
@@ -2311,7 +2431,10 @@ export const getDistributorSuggestionsByNdc = async (
           name
         )
       )
-    `);
+    `)
+    .eq('pharmacy_id', pharmacyId);
+
+  console.log(`🏥 getDistributorSuggestionsByNdc: Filtering return_reports by pharmacy_id = ${pharmacyId}`);
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
@@ -2623,8 +2746,9 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     }
   }
 
-  // Step 2: Get all return reports
+  // Step 2: Get all return reports for this pharmacy
   // Join with uploaded_documents and reverse_distributors to get distributor name
+  // Filter by pharmacy_id to only get the pharmacy's own return reports
   const { data: returnReports, error: reportsError } = await db
     .from('return_reports')
     .select(`
@@ -2638,7 +2762,10 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
           name
         )
       )
-    `);
+    `)
+    .eq('pharmacy_id', pharmacyId);
+
+  console.log(`🏥 getDistributorSuggestionsByMultipleNdcs: Filtering return_reports by pharmacy_id = ${pharmacyId}`);
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
@@ -2808,7 +2935,37 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     ndcProductNames[normalizedNdc] = productName;
   }
 
-  // Step 6: Group by distributor
+  // Step 6: Find distributors that support ALL NDCs
+  // First, get the set of distributors for each NDC
+  const distributorsByNdc: Record<string, Set<string>> = {};
+  items.forEach((item) => {
+    const normalizedNdc = item.ndc.trim();
+    const distributorAverages = ndcDistributorAverages[normalizedNdc] || [];
+    distributorsByNdc[normalizedNdc] = new Set(
+      distributorAverages.map((dist) => dist.distributorName.trim())
+    );
+  });
+
+  // Find distributors that appear in ALL NDC sets (support all NDCs)
+  const allDistributorNames = new Set<string>();
+  Object.values(distributorsByNdc).forEach((distSet) => {
+    distSet.forEach((distName) => allDistributorNames.add(distName));
+  });
+
+  const distributorsWithAllNdcs = new Set<string>();
+  allDistributorNames.forEach((distName) => {
+    // Check if this distributor appears in ALL NDC sets
+    const supportsAllNdcs = items.every((item) => {
+      const normalizedNdc = item.ndc.trim();
+      return distributorsByNdc[normalizedNdc]?.has(distName) || false;
+    });
+
+    if (supportsAllNdcs) {
+      distributorsWithAllNdcs.add(distName);
+    }
+  });
+
+  // Step 7: Group by distributor (only those that support ALL NDCs)
   const distributorMap: Record<string, DistributorWithNdcs> = {};
   const ndcsWithDistributors = new Set<string>();
 
@@ -2821,11 +2978,17 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
       return;
     }
 
-    ndcsWithDistributors.add(normalizedNdc);
-
-    // Add this NDC to all distributors that accept it
+    // Only process distributors that support ALL NDCs
     distributorAverages.forEach((dist) => {
-      const distributorName = dist.distributorName;
+      const distributorName = dist.distributorName.trim();
+
+      // Skip if this distributor doesn't support all NDCs
+      if (!distributorsWithAllNdcs.has(distributorName)) {
+        return;
+      }
+
+      // Mark this NDC as having at least one distributor (that supports all)
+      ndcsWithDistributors.add(normalizedNdc);
 
       if (!distributorMap[distributorName]) {
         distributorMap[distributorName] = {
@@ -2854,7 +3017,7 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     });
   });
 
-  // Step 7: Fetch distributor contact information
+  // Step 8: Fetch distributor contact information
   const distributorNames = Object.keys(distributorMap);
   if (distributorNames.length > 0) {
     const { data: distributors, error: distError } = await db
@@ -2894,7 +3057,7 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     }
   }
 
-  // Step 8: Build distributors array and calculate totals
+  // Step 9: Build distributors array and calculate totals
   const distributorsArray: DistributorWithNdcs[] = Object.values(distributorMap).map((dist) => ({
     ...dist,
     totalEstimatedValue: Math.round(dist.totalEstimatedValue * 100) / 100,
@@ -2903,7 +3066,7 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
   // Sort by total estimated value (highest first)
   distributorsArray.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
 
-  // Step 9: Find NDCs without any distributors
+  // Step 10: Find NDCs without any distributors (that support all NDCs)
   const ndcsWithoutDistributors: NdcWithoutDistributor[] = [];
   items.forEach((item) => {
     const normalizedNdc = item.ndc.trim();
