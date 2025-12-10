@@ -1505,7 +1505,7 @@ export const getPackageRecommendations = async (
   // Step 1: Get all product list items for this pharmacy
   const { data: productItems, error: itemsError } = await db
     .from('product_list_items')
-    .select('id, ndc, product_name, quantity')
+    .select('id, ndc, product_name, full_units, partial_units')
     .eq('added_by', pharmacyId);
 
   if (itemsError) {
@@ -1704,7 +1704,10 @@ export const getPackageRecommendations = async (
       return;
     }
 
-    const quantity = productItem.quantity || 1;
+    // Calculate quantity as sum of full_units and partial_units
+    const fullUnits = (productItem as any).full_units || 0;
+    const partialUnits = (productItem as any).partial_units || 0;
+    const quantity = fullUnits + partialUnits || 1;
     const pricePerUnit = distributorInfo.pricePerUnit;
     const totalValue = pricePerUnit * quantity;
 
@@ -2551,22 +2554,22 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
 
   const db = supabaseAdmin;
 
-  // Step 1: Validate quantities for all items first
+  // Step 1: Validate items exist in inventory (no longer checking quantity)
   const { data: productItems, error: itemsError } = await db
     .from('product_list_items')
-    .select('ndc, quantity, product_name')
+    .select('ndc, full_units, partial_units, product_name')
     .eq('added_by', pharmacyId);
 
   if (itemsError) {
     throw new AppError(`Failed to fetch product list items: ${itemsError.message}`, 400);
   }
 
-  // Validate each item has enough quantity
+  // Validate each item exists in inventory
   for (const item of items) {
     const normalizedNdc = item.ndc.trim();
     const normalizedNdcForSearch = normalizedNdc.replace(/-/g, '').trim();
     
-    let availableQuantity = 0;
+    let productExists = false;
     if (productItems && productItems.length > 0) {
       productItems.forEach((pItem) => {
         const itemNdc = String(pItem.ndc).trim();
@@ -2578,12 +2581,12 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
           itemNdc === normalizedNdcForSearch ||
           normalizedItemNdc === normalizedNdc
         ) {
-          availableQuantity += pItem.quantity || 0;
+          productExists = true;
         }
       });
     }
 
-    if (availableQuantity < item.quantity) {
+    if (!productExists) {
       // Get product name for error
       let productName = item.product || `Product ${normalizedNdc}`;
       if (!item.product) {
@@ -2613,17 +2616,10 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
         }
       }
 
-      if (availableQuantity === 0) {
-        throw new AppError(
-          `You don't have this product in your inventory. NDC: ${normalizedNdc}, Product: ${productName}`,
-          400
-        );
-      } else {
-        throw new AppError(
-          `You don't have enough quantity for this product. NDC: ${normalizedNdc}, Product: ${productName}, Available: ${availableQuantity}, Requested: ${item.quantity}`,
-          400
-        );
-      }
+      throw new AppError(
+        `You don't have this product in your inventory. NDC: ${normalizedNdc}, Product: ${productName}`,
+        400
+      );
     }
   }
 
