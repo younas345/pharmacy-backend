@@ -27,6 +27,12 @@ export const productListsSchemas = {
         example: 0,
         description: 'Number of partial units. Must be 0 if full_units > 0, or > 0 if full_units = 0',
       },
+      quantity: {
+        type: 'integer',
+        minimum: 0,
+        example: 10,
+        description: 'Total quantity calculated as full_units + partial_units',
+      },
       lot_number: {
         type: 'string',
         nullable: true,

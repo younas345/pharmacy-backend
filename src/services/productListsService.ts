@@ -7,6 +7,7 @@ export interface ProductListItem {
   product_name: string;
   full_units: number;
   partial_units: number;
+  quantity: number; // Calculated as full_units + partial_units
   lot_number?: string;
   expiration_date?: string;
   notes?: string;
@@ -62,7 +63,12 @@ export const addProductListItem = async (
   }
 
   console.log('✅ Item added to product_list_items:', data);
-  return data;
+  
+  // Add quantity field (sum of full_units and partial_units)
+  return {
+    ...data,
+    quantity: (data.full_units || 0) + (data.partial_units || 0),
+  };
 };
 
 // Remove item from product list
@@ -119,7 +125,11 @@ export const getProductListItems = async (pharmacyId: string): Promise<ProductLi
 
   const packageIds = (packages || []).map((pkg: any) => pkg.id);
 
-  return items;
+  // Add quantity field (sum of full_units and partial_units) to each item
+  return items.map((item: any) => ({
+    ...item,
+    quantity: (item.full_units || 0) + (item.partial_units || 0),
+  }));
 };
 
 // Update product list item
@@ -202,7 +212,12 @@ export const updateProductListItem = async (
   }
 
   console.log('✅ Item updated in product_list_items:', data);
-  return data;
+  
+  // Add quantity field (sum of full_units and partial_units)
+  return {
+    ...data,
+    quantity: (data.full_units || 0) + (data.partial_units || 0),
+  };
 };
 
 // Clear all product list items for a pharmacy
