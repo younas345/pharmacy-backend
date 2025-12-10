@@ -18,10 +18,14 @@ export interface OptimizationRecommendation {
   };
   expectedPrice: number;
   worstPrice: number;
+  fullPricePerUnit?: number; // Price per unit for full units (search mode only)
+  partialPricePerUnit?: number; // Price per unit for partial units (search mode only)
   available?: boolean;
   alternativeDistributors: Array<{
     name: string;
     price: number;
+    fullPrice?: number; // Price for full units from this distributor
+    partialPrice?: number; // Price for partial units from this distributor
     difference: number;
     available?: boolean;
     email?: string;
@@ -29,7 +33,7 @@ export interface OptimizationRecommendation {
     location?: string;
   }>;
   savings: number;
-  _distributorAverages?: Array<{ name: string; price: number }>; // Temporary storage for availability check
+  _distributorAverages?: Array<{ name: string; price: number; fullPrice?: number; partialPrice?: number }>; // Temporary storage for availability check
 }
 
 export interface OptimizationResponse {
@@ -171,7 +175,7 @@ export const getOptimizationRecommendations = async (
 
   // Step 3: Search return_reports for matching NDCs
   // Join with uploaded_documents and reverse_distributors to get distributor name
-  let returnReportsQuery = db
+  const baseQuery = db
     .from('return_reports')
     .select(`
       id,
@@ -190,19 +194,18 @@ export const getOptimizationRecommendations = async (
       )
     `);
 
-  // In non-search mode, filter return_reports by current pharmacy_id
-  // This ensures full/partial values come only from the pharmacy's own records
-  if (!isSearchMode) {
-    returnReportsQuery = returnReportsQuery.eq('pharmacy_id', pharmacyId);
-    console.log(`🏥 Non-search mode: Filtering return_reports by pharmacy_id = ${pharmacyId}`);
-  }
+  // IMPORTANT: Do NOT filter return_reports by pharmacy_id for pricing data
+  // We want to show prices from ALL distributors across ALL return reports
+  // The pharmacy's inventory comes from product_list_items (filtered by added_by = pharmacyId)
+  // But pricing data should include all distributors to find the best prices
+  console.log(`🏥 Fetching return_reports from ALL distributors (no pharmacy_id filter for pricing)`);
+  console.log(`   Pharmacy inventory NDCs will be matched against all available distributor prices`);
 
-  // In search mode, filter by NDC at database level for better performance
-  // Use ilike for partial matching (similar to SQL LIKE) to catch all variations
+  // Build filter conditions for search mode
+  let orConditions: string[] = [];
   if (isSearchMode && searchNdcs && searchNdcs.length > 0) {
     // Build OR conditions for each search NDC
     // Match both with dashes and without dashes using ilike for partial matching
-    const orConditions: string[] = [];
     searchNdcs.forEach(searchNdc => {
       const normalized = String(searchNdc).replace(/-/g, '').trim();
       const withDashes = String(searchNdc).trim();
@@ -242,20 +245,49 @@ export const getOptimizationRecommendations = async (
       }
     });
     
-    // Use OR to match any of the conditions
     if (orConditions.length > 0) {
-      returnReportsQuery = returnReportsQuery.or(orConditions.join(','));
       console.log(`🔍 Filtering return_reports by NDC at database level (partial match)`);
       console.log(`   Search NDCs:`, searchNdcs);
       console.log(`   OR conditions:`, orConditions);
     }
   }
 
-  const { data: returnReports, error: reportsError } = await returnReportsQuery;
+  // Fetch ALL records using pagination (Supabase default limit is 1000)
+  // Fetch in batches of 1000 until we get all records
+  console.log(`📊 Fetching ALL return_reports using pagination...`);
+  const returnReports: any[] = [];
+  const batchSize = 1000;
+  let offset = 0;
+  let hasMore = true;
 
-  if (reportsError) {
-    throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
+  while (hasMore) {
+    // Build query for this batch, applying filters if any
+    let batchQuery = baseQuery.range(offset, offset + batchSize - 1);
+    if (orConditions.length > 0) {
+      batchQuery = batchQuery.or(orConditions.join(','));
+    }
+    
+    const { data: batch, error: batchError } = await batchQuery;
+
+    if (batchError) {
+      throw new AppError(`Failed to fetch return reports: ${batchError.message}`, 400);
+    }
+
+    if (batch && batch.length > 0) {
+      returnReports.push(...batch);
+      offset += batchSize;
+      console.log(`   ✅ Fetched ${returnReports.length} records so far...`);
+      
+      // If we got fewer records than batch size, we've reached the end
+      if (batch.length < batchSize) {
+        hasMore = false;
+      }
+    } else {
+      hasMore = false;
+    }
   }
+
+  console.log(`📊 Total return_reports fetched: ${returnReports.length}`);
 
   // Sort by report_date (latest first) for determining latest prices
   // Apply to all modes - always use latest price based on report_date
@@ -341,6 +373,11 @@ export const getOptimizationRecommendations = async (
   
   // Map to track latest price per distributor-NDC combination (for alternatives in search mode)
   const distributorNdcToLatestPriceMap: Record<string, number> = {}; // Key format: "distributorName|ndc"
+  
+  // Maps to track full and partial prices separately per distributor-NDC combination (for search mode)
+  // Key format: "distributorName|ndc", Value: price per unit
+  const distributorNdcToFullPriceMap: Record<string, number> = {};
+  const distributorNdcToPartialPriceMap: Record<string, number> = {};
 
   // Initialize map for all NDCs
   ndcs.forEach((ndc) => {
@@ -352,6 +389,10 @@ export const getOptimizationRecommendations = async (
   if (isSearchMode) {
     console.log(`\n=== PROCESSING RETURN REPORTS FOR SEARCH MODE ===`);
     console.log(`📊 Total return reports to process: ${returnReports?.length || 0}`);
+  } else {
+    console.log(`\n=== PROCESSING RETURN REPORTS FOR NON-SEARCH MODE ===`);
+    console.log(`📊 Total return reports to scan: ${returnReports?.length || 0}`);
+    console.log(`🔍 Pharmacy inventory NDCs to match:`, ndcs);
   }
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
@@ -432,18 +473,21 @@ export const getOptimizationRecommendations = async (
       // Normalize NDC for comparison (remove dashes and convert to string)
       const normalizedNdcCode = String(ndcCode).replace(/-/g, '').trim();
       
-      // Filter by full and partial if we have unit type requirements (both search mode and inventory mode)
-      if (ndcUnitTypeMap.size > 0) {
-        // Get full and partial from item data (return_reports uses "full" and "partial" fields)
-        const itemFull = Number(item.full) || 0;
-        const itemPartial = Number(item.partial) || 0;
+      // Get full and partial from item data (return_reports uses "full" and "partial" fields)
+      const itemFull = Number(item.full) || 0;
+      const itemPartial = Number(item.partial) || 0;
+      
+      // In search mode, do NOT filter by unit type - we want to collect ALL records
+      // to show both full and partial prices in the response
+      if (!isSearchMode && ndcUnitTypeMap.size > 0) {
+        // Non-search mode: Apply unit type filtering based on inventory
         
         // Find which NDC this item matches and get its unit type requirement
         let unitTypeRequirement: { requiresFull: boolean; requiresPartial: boolean } | undefined;
         
-        // Check if this normalized NDC matches any search term
-        for (const [normalizedSearchNdc, requirement] of ndcUnitTypeMap.entries()) {
-          if (normalizedNdcCode === normalizedSearchNdc) {
+        // Check if this normalized NDC matches any inventory NDC
+        for (const [normalizedInventoryNdc, requirement] of ndcUnitTypeMap.entries()) {
+          if (normalizedNdcCode === normalizedInventoryNdc) {
             unitTypeRequirement = requirement;
             break;
           }
@@ -457,9 +501,7 @@ export const getOptimizationRecommendations = async (
           if (requiresFull) {
             if (itemFull === 0 || itemPartial > 0) {
               // Skip: full is 0 or partial > 0 (doesn't match FullCount requirement)
-              if (isSearchMode) {
-                console.log(`   ⏭️ Skipping item - FullCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need full > 0 and partial = 0)`);
-              }
+              console.log(`   ⏭️ Skipping item - FullCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need full > 0 and partial = 0)`);
               return;
             }
           }
@@ -468,16 +510,12 @@ export const getOptimizationRecommendations = async (
           if (requiresPartial) {
             if (itemPartial === 0 || itemFull > 0) {
               // Skip: partial is 0 or full > 0 (doesn't match PartialCount requirement)
-              if (isSearchMode) {
-                console.log(`   ⏭️ Skipping item - PartialCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need partial > 0 and full = 0)`);
-              }
+              console.log(`   ⏭️ Skipping item - PartialCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need partial > 0 and full = 0)`);
               return;
             }
           }
           
-          if (isSearchMode) {
-            console.log(`   ✅ Item passed unit filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial}`);
-          }
+          console.log(`   ✅ Item passed unit filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial}`);
         }
       }
       
@@ -637,8 +675,7 @@ export const getOptimizationRecommendations = async (
 
       // Track full and partial from return_reports (use latest value, not sum)
       // Store the latest full and partial values (since we sorted by report_date desc, first match is latest)
-      const itemFull = Number(item.full) || 0;
-      const itemPartial = Number(item.partial) || 0;
+      // Note: itemFull and itemPartial are already extracted at the beginning of this block (line ~477)
       // Always update with latest value (first match is latest due to sorting)
       if (ndcToFullMap[actualNdcKey] === undefined) {
         ndcToFullMap[actualNdcKey] = itemFull;
@@ -655,10 +692,9 @@ export const getOptimizationRecommendations = async (
           quantity,
         });
         
-        if (isSearchMode) {
-          console.log(`   ✅ Added to pricing map: NDC=${actualNdcKey}, Distributor="${distributorName}", Price=${pricePerUnit}, Quantity=${quantity}`);
-          console.log(`   📊 Total entries in pricing map for ${actualNdcKey}: ${ndcPricingMap[actualNdcKey].length}`);
-        }
+        // Log for both search and non-search modes to track pricing data collection
+        console.log(`   ✅ Added to pricing map: NDC=${actualNdcKey}, Distributor="${distributorName}", Price=${pricePerUnit}, Quantity=${quantity}`);
+        console.log(`   📊 Total entries in pricing map for ${actualNdcKey}: ${ndcPricingMap[actualNdcKey].length}`);
         
         // Track latest price per NDC based on report_date (apply to all modes)
         // Get report_date (prefer report_date, then uploaded_at, then created_at)
@@ -692,7 +728,25 @@ export const getOptimizationRecommendations = async (
           }
         }
         
-        console.log(`✅ Matched NDC ${actualNdcKey} (search term: ${matchingNdc}) with distributor "${distributorName}", price: ${pricePerUnit}`);
+        // In search mode, track FULL and PARTIAL prices separately per distributor-NDC
+        // A record is for FULL if full > 0 and partial = 0
+        // A record is for PARTIAL if partial > 0 and full = 0
+        if (isSearchMode) {
+          const isFullRecord = itemFull > 0 && itemPartial === 0;
+          const isPartialRecord = itemPartial > 0 && itemFull === 0;
+          
+          if (isFullRecord && !distributorNdcToFullPriceMap[distributorNdcKey]) {
+            distributorNdcToFullPriceMap[distributorNdcKey] = pricePerUnit;
+            console.log(`   💰 FULL price for ${distributorName}|${actualNdcKey}: ${pricePerUnit}`);
+          }
+          
+          if (isPartialRecord && !distributorNdcToPartialPriceMap[distributorNdcKey]) {
+            distributorNdcToPartialPriceMap[distributorNdcKey] = pricePerUnit;
+            console.log(`   💰 PARTIAL price for ${distributorName}|${actualNdcKey}: ${pricePerUnit}`);
+          }
+        }
+        
+        console.log(`✅ Matched NDC ${actualNdcKey} (search term: ${matchingNdc}) with distributor "${distributorName}", price: ${pricePerUnit}, full=${itemFull}, partial=${itemPartial}`);
       } else {
         if (isSearchMode) {
           console.log(`   ❌ Skipped NDC ${actualNdcKey} - invalid price: ${pricePerUnit} (creditAmount: ${creditAmount}, quantity: ${quantity})`);
@@ -979,9 +1033,19 @@ export const getOptimizationRecommendations = async (
           console.log(`   🔍 Available keys in latestPriceMap:`, Object.keys(distributorNdcToLatestPriceMap).filter(k => k.includes(distributorName) || k.includes(ndc)));
         }
         
+        // In search mode, also get full and partial prices for this distributor-NDC
+        const fullPrice = isSearchMode ? (distributorNdcToFullPriceMap[distributorNdcKey] || 0) : undefined;
+        const partialPrice = isSearchMode ? (distributorNdcToPartialPriceMap[distributorNdcKey] || 0) : undefined;
+        
+        if (isSearchMode) {
+          console.log(`   💰 ${distributorName}|${ndc}: price=${price}, fullPrice=${fullPrice}, partialPrice=${partialPrice}`);
+        }
+        
         return {
           name: distributorName,
           price,
+          fullPrice,
+          partialPrice,
         };
       });
     
@@ -1180,10 +1244,12 @@ export const getOptimizationRecommendations = async (
 
     // COMMENTED OUT: Find the highest price distributor that IS available
     // Now just use the highest price distributor (first one since already sorted)
-    let recommended: { name: string; price: number } | null = null;
+    let recommended: { name: string; price: number; fullPrice?: number; partialPrice?: number } | null = null;
     const alternatives: Array<{ 
       name: string; 
-      price: number; 
+      price: number;
+      fullPrice?: number;
+      partialPrice?: number;
       difference: number; 
       available: boolean;
       email?: string;
@@ -1217,6 +1283,8 @@ export const getOptimizationRecommendations = async (
           alternatives.push({
             name: dist.name,
             price: dist.price,
+            fullPrice: dist.fullPrice,
+            partialPrice: dist.partialPrice,
             difference: dist.price - recommended!.price, // Negative means lower price (worse)
             // available: distributorAvailabilityMap[dist.name] ?? false,
             email: contactInfo.email,
@@ -1225,7 +1293,7 @@ export const getOptimizationRecommendations = async (
             // COMMENTED OUT: available: distributorAvailabilityMap[dist.name] ?? false,
             available: true, // Always mark as available since we're not checking
           });
-          console.log(`   ➕ Added alternative: ${dist.name} (price: ${dist.price}, difference: ${dist.price - recommended!.price})`);
+          console.log(`   ➕ Added alternative: ${dist.name} (price: ${dist.price}, fullPrice: ${dist.fullPrice}, partialPrice: ${dist.partialPrice}, difference: ${dist.price - recommended!.price})`);
         }
       });
       console.log(`   📋 Total alternatives: ${alternatives.length}`);
@@ -1242,6 +1310,9 @@ export const getOptimizationRecommendations = async (
         location: recommendedContactInfo.location,
       };
       rec.expectedPrice = recommended.price;
+      // In search mode, add full and partial prices from recommended distributor
+      rec.fullPricePerUnit = recommended.fullPrice;
+      rec.partialPricePerUnit = recommended.partialPrice;
       // COMMENTED OUT: rec.available = distributorAvailabilityMap[recommended.name] ?? false;
       rec.available = true; // Always mark as available since we're not checking
       rec.alternativeDistributors = alternatives;
@@ -1249,6 +1320,8 @@ export const getOptimizationRecommendations = async (
       // Calculate savings (difference between recommended and worst price)
       const worstPrice = rec.worstPrice;
       rec.savings = Math.max(0, (recommended.price - worstPrice) * (rec.quantity || 1));
+      
+      console.log(`   💰 Set prices for ${rec.ndc}: expectedPrice=${rec.expectedPrice}, fullPricePerUnit=${rec.fullPricePerUnit}, partialPricePerUnit=${rec.partialPricePerUnit}`);
     }
 
     // Remove temporary storage
@@ -1647,8 +1720,9 @@ export const getPackageRecommendations = async (
 
   // Step 3: Get pricing data from return_reports
   // Join with uploaded_documents and reverse_distributors to get distributor name
-  // Filter by pharmacy_id to only get the pharmacy's own return reports
-  const { data: returnReports, error: reportsError } = await db
+  // IMPORTANT: Do NOT filter by pharmacy_id - we want ALL distributor prices
+  // to find the best prices across all distributors
+  const baseQuery = db
     .from('return_reports')
     .select(`
       id,
@@ -1661,14 +1735,41 @@ export const getPackageRecommendations = async (
           name
         )
       )
-    `)
-    .eq('pharmacy_id', pharmacyId);
+    `);
 
-  console.log(`🏥 getPackageRecommendations: Filtering return_reports by pharmacy_id = ${pharmacyId}`);
+  console.log(`🏥 getPackageRecommendations: Fetching return_reports from ALL distributors (no pharmacy_id filter)`);
 
-  if (reportsError) {
-    throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
+  // Fetch ALL records using pagination (Supabase default limit is 1000)
+  // Fetch in batches of 1000 until we get all records
+  console.log(`📊 Fetching ALL return_reports using pagination...`);
+  const returnReports: any[] = [];
+  const batchSize = 1000;
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const batchQuery = baseQuery.range(offset, offset + batchSize - 1);
+    const { data: batch, error: batchError } = await batchQuery;
+
+    if (batchError) {
+      throw new AppError(`Failed to fetch return reports: ${batchError.message}`, 400);
+    }
+
+    if (batch && batch.length > 0) {
+      returnReports.push(...batch);
+      offset += batchSize;
+      console.log(`   ✅ Fetched ${returnReports.length} records so far...`);
+      
+      // If we got fewer records than batch size, we've reached the end
+      if (batch.length < batchSize) {
+        hasMore = false;
+      }
+    } else {
+      hasMore = false;
+    }
   }
+
+  console.log(`📊 Total return_reports fetched: ${returnReports.length}`);
 
   // Step 4: Build pricing map (NDC -> Distributor -> Best Price)
   const ndcPricingMap: Record<
@@ -1907,24 +2008,119 @@ export const getPackageRecommendations = async (
     }
   );
 
+  // Step 9: Fetch existing custom packages and decrement quantities
+  console.log(`📦 Fetching existing custom packages for pharmacy ${pharmacyId}...`);
+  const { data: existingPackages, error: existingPackagesError } = await db
+    .from('custom_packages')
+    .select('id')
+    .eq('pharmacy_id', pharmacyId);
+
+  if (existingPackagesError) {
+    console.warn(`⚠️ Failed to fetch existing packages: ${existingPackagesError.message}`);
+  }
+
+  // Build a map of NDC -> total quantity already in packages
+  const ndcToExistingQuantityMap: Record<string, number> = {};
+  
+  if (existingPackages && existingPackages.length > 0) {
+    const packageIds = existingPackages.map((pkg: any) => pkg.id);
+    
+    const { data: existingPackageItems, error: itemsError } = await db
+      .from('custom_package_items')
+      .select('ndc, quantity')
+      .in('package_id', packageIds);
+
+    if (!itemsError && existingPackageItems) {
+      existingPackageItems.forEach((item: any) => {
+        const ndc = String(item.ndc).trim();
+        const quantity = Number(item.quantity) || 0;
+        
+        // Normalize NDC (remove dashes) for matching
+        // This ensures we match NDCs regardless of dash format (e.g., "12345-678-90" = "1234567890")
+        const normalizedNdc = ndc.replace(/-/g, '').trim();
+        
+        // Add to map (sum quantities if same NDC appears multiple times)
+        // Use normalized NDC as key for consistent matching
+        if (!ndcToExistingQuantityMap[normalizedNdc]) {
+          ndcToExistingQuantityMap[normalizedNdc] = 0;
+        }
+        ndcToExistingQuantityMap[normalizedNdc] += quantity;
+      });
+      
+      console.log(`📦 Found ${existingPackageItems.length} items in existing packages`);
+      console.log(`📊 Total unique NDCs already in packages: ${Object.keys(ndcToExistingQuantityMap).length}`);
+      if (Object.keys(ndcToExistingQuantityMap).length > 0) {
+        console.log(`📊 Quantities by NDC:`, Object.entries(ndcToExistingQuantityMap).map(([ndc, qty]) => `${ndc}: ${qty}`).join(', '));
+      }
+    }
+  }
+
+  // Step 10: Decrement quantities from suggestions and remove products with quantity <= 0
+  packages.forEach((pkg) => {
+    pkg.products = pkg.products
+      .map((product) => {
+        // Normalize NDC for matching (both stored and product NDCs are normalized)
+        const normalizedProductNdc = String(product.ndc).replace(/-/g, '').trim();
+        const existingQuantity = ndcToExistingQuantityMap[normalizedProductNdc] || 0;
+        
+        // Decrement quantity
+        const newQuantity = product.quantity - existingQuantity;
+        
+        if (newQuantity <= 0) {
+          // Remove product if quantity is 0 or negative
+          console.log(`   ❌ Removing product ${product.ndc} from ${pkg.distributorName} - quantity would be ${newQuantity} (existing: ${existingQuantity}, suggested: ${product.quantity})`);
+          return null;
+        }
+        
+        // Update product with new quantity and recalculate total value
+        const updatedProduct = {
+          ...product,
+          quantity: newQuantity,
+          totalValue: product.pricePerUnit * newQuantity,
+        };
+        
+        if (existingQuantity > 0) {
+          console.log(`   ✅ Updated product ${product.ndc} in ${pkg.distributorName}: ${product.quantity} → ${newQuantity} (decremented ${existingQuantity})`);
+        }
+        return updatedProduct;
+      })
+      .filter((product): product is PackageProduct => product !== null); // Remove null entries
+  });
+
+  // Step 11: Remove packages with no products after decrementing
+  const filteredPackages = packages.filter((pkg) => {
+    if (pkg.products.length === 0) {
+      console.log(`   🗑️ Removing package for ${pkg.distributorName} - no products remaining`);
+      return false;
+    }
+    return true;
+  });
+
+  // Recalculate package totals after filtering
+  filteredPackages.forEach((pkg) => {
+    pkg.totalItems = pkg.products.reduce((sum, p) => sum + p.quantity, 0);
+    pkg.totalEstimatedValue = Math.round(pkg.products.reduce((sum, p) => sum + p.totalValue, 0) * 100) / 100;
+    pkg.averagePricePerUnit = pkg.totalItems > 0 ? Math.round((pkg.totalEstimatedValue / pkg.totalItems) * 100) / 100 : 0;
+  });
+
   // Sort packages by total estimated value (highest first)
-  packages.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
+  filteredPackages.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
 
   // Calculate summary statistics
   const productsWithPricing = Object.keys(productDistributorMap).length;
   const productsWithoutPricing = productItems.length - productsWithPricing;
-  const totalEstimatedValue = packages.reduce((sum, pkg) => sum + pkg.totalEstimatedValue, 0);
+  const totalEstimatedValue = filteredPackages.reduce((sum, pkg) => sum + pkg.totalEstimatedValue, 0);
 
   return {
-    packages,
+    packages: filteredPackages,
     totalProducts: productItems.length,
-    totalPackages: packages.length,
+    totalPackages: filteredPackages.length,
     totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
     generatedAt: new Date().toISOString(),
     summary: {
       productsWithPricing,
       productsWithoutPricing,
-      distributorsUsed: packages.length,
+      distributorsUsed: filteredPackages.length,
     },
   };
 };
@@ -1988,7 +2184,7 @@ export const getPackageRecommendationsByNdcs = async (
 
   // Step 3: Get pricing data from return_reports
   // Join with uploaded_documents and reverse_distributors to get distributor name
-  const { data: returnReports, error: reportsError } = await db
+  const baseQuery = db
     .from('return_reports')
     .select(`
       id,
@@ -2003,9 +2199,37 @@ export const getPackageRecommendationsByNdcs = async (
       )
     `);
 
-  if (reportsError) {
-    throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
+  // Fetch ALL records using pagination (Supabase default limit is 1000)
+  // Fetch in batches of 1000 until we get all records
+  console.log(`📊 Fetching ALL return_reports using pagination...`);
+  const returnReports: any[] = [];
+  const batchSize = 1000;
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const batchQuery = baseQuery.range(offset, offset + batchSize - 1);
+    const { data: batch, error: batchError } = await batchQuery;
+
+    if (batchError) {
+      throw new AppError(`Failed to fetch return reports: ${batchError.message}`, 400);
+    }
+
+    if (batch && batch.length > 0) {
+      returnReports.push(...batch);
+      offset += batchSize;
+      console.log(`   ✅ Fetched ${returnReports.length} records so far...`);
+      
+      // If we got fewer records than batch size, we've reached the end
+      if (batch.length < batchSize) {
+        hasMore = false;
+      }
+    } else {
+      hasMore = false;
+    }
   }
+
+  console.log(`📊 Total return_reports fetched: ${returnReports.length}`);
 
   // Step 4: Build pricing map (NDC -> Distributor -> Best Price)
   const ndcPricingMap: Record<
@@ -2417,7 +2641,8 @@ export const getDistributorSuggestionsByNdc = async (
 
   // Step 3: Get pricing data from return_reports
   // Join with uploaded_documents and reverse_distributors to get distributor name
-  // Filter by pharmacy_id to only get the pharmacy's own return reports
+  // IMPORTANT: Do NOT filter by pharmacy_id - we want ALL distributor prices
+  // to find the best prices across all distributors
   const { data: returnReports, error: reportsError } = await db
     .from('return_reports')
     .select(`
@@ -2431,10 +2656,9 @@ export const getDistributorSuggestionsByNdc = async (
           name
         )
       )
-    `)
-    .eq('pharmacy_id', pharmacyId);
+    `);
 
-  console.log(`🏥 getDistributorSuggestionsByNdc: Filtering return_reports by pharmacy_id = ${pharmacyId}`);
+  console.log(`🏥 getDistributorSuggestionsByNdc: Fetching return_reports from ALL distributors (no pharmacy_id filter)`);
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
@@ -2746,9 +2970,10 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     }
   }
 
-  // Step 2: Get all return reports for this pharmacy
+  // Step 2: Get all return reports from ALL distributors
   // Join with uploaded_documents and reverse_distributors to get distributor name
-  // Filter by pharmacy_id to only get the pharmacy's own return reports
+  // IMPORTANT: Do NOT filter by pharmacy_id - we want ALL distributor prices
+  // to find the best prices across all distributors
   const { data: returnReports, error: reportsError } = await db
     .from('return_reports')
     .select(`
@@ -2762,10 +2987,9 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
           name
         )
       )
-    `)
-    .eq('pharmacy_id', pharmacyId);
+    `);
 
-  console.log(`🏥 getDistributorSuggestionsByMultipleNdcs: Filtering return_reports by pharmacy_id = ${pharmacyId}`);
+  console.log(`🏥 getDistributorSuggestionsByMultipleNdcs: Fetching return_reports from ALL distributors (no pharmacy_id filter)`);
 
   if (reportsError) {
     throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
