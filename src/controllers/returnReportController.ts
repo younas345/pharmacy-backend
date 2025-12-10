@@ -132,6 +132,8 @@ export const getReturnReportsByDistributorAndNdcHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const distributorId = req.query.distributor_id as string;
     const ndcCode = req.query.ndc_code as string;
+    const pharmacyId = req.query.pharmacy_id as string | undefined;
+    const type = req.query.type as 'full' | 'partial' | undefined;
     const format = req.query.format as string | undefined; // Optional: 'graph' or default
 
     if (!distributorId) {
@@ -142,7 +144,12 @@ export const getReturnReportsByDistributorAndNdcHandler = catchAsync(
       throw new AppError('ndc_code query parameter is required', 400);
     }
 
-    const results = await getReturnReportsByDistributorAndNdc(distributorId, ndcCode);
+    // Validate type parameter if provided
+    if (type && type !== 'full' && type !== 'partial') {
+      throw new AppError('type parameter must be either "full" or "partial"', 400);
+    }
+
+    const results = await getReturnReportsByDistributorAndNdc(distributorId, ndcCode, pharmacyId, type);
 
     // If format=graph is requested, return graph format
     if (format === 'graph') {
