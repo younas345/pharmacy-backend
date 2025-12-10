@@ -121,6 +121,22 @@ router.post('/process', upload.single('file'), processReturnReportHandler);
  *         description: NDC code to search for
  *         example: "65862-0218-60"
  *       - in: query
+ *         name: pharmacy_id
+ *         required: false
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Pharmacy ID to filter return reports by pharmacy
+ *         example: "244261d5-e7f5-4205-84b6-fd3314ee73e6"
+ *       - in: query
+ *         name: type
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [full, partial]
+ *         description: Filter by unit type - 'full' to match records with full > 0, 'partial' to match records with partial > 0. Returns the record with maximum full/partial value per date group.
+ *         example: "full"
+ *       - in: query
  *         name: format
  *         required: false
  *         schema:

@@ -29,29 +29,17 @@ export const getOptimizationRecommendationsHandler = catchAsync(
       ? partialCountParam.split(',').map(v => v.trim()).filter(v => v.length > 0).map(v => Number(v))
       : undefined;
 
-    // Validate: if ndc is provided, at least one of FullCount or PartialCount must be provided
+    // FullCount and PartialCount are now OPTIONAL in search mode
+    // When provided, they filter the return_reports by unit type
+    // When NOT provided, all records are fetched and both full/partial prices are returned
+    // Validate array lengths only if provided
     if (ndcs && ndcs.length > 0) {
-      if ((!fullCounts || fullCounts.length === 0) && (!partialCounts || partialCounts.length === 0)) {
-        throw new AppError('When ndc is provided, at least one of FullCount or PartialCount must be provided (comma-separated, matching NDC order)', 400);
-      }
-
-      // Validate that the count arrays match the NDC array length
       if (fullCounts && fullCounts.length !== ndcs.length) {
         throw new AppError(`FullCount array length (${fullCounts.length}) must match NDC array length (${ndcs.length})`, 400);
       }
 
       if (partialCounts && partialCounts.length !== ndcs.length) {
         throw new AppError(`PartialCount array length (${partialCounts.length}) must match NDC array length (${ndcs.length})`, 400);
-      }
-
-      // Validate that for each NDC, at least one of full or partial is specified
-      for (let i = 0; i < ndcs.length; i++) {
-        const hasFull = fullCounts && fullCounts[i] !== undefined && fullCounts[i] !== null;
-        const hasPartial = partialCounts && partialCounts[i] !== undefined && partialCounts[i] !== null;
-        
-        if (!hasFull && !hasPartial) {
-          throw new AppError(`For NDC ${ndcs[i]}, at least one of FullCount or PartialCount must be provided at position ${i + 1}`, 400);
-        }
       }
     }
 

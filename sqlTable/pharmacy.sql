@@ -3,6 +3,8 @@ create table public.pharmacy (
   email character varying(255) not null,
   name character varying(255) not null,
   pharmacy_name character varying(255) not null,
+  npi_number character varying(50) null,
+  dea_number character varying(50) null,
   phone character varying(20) null,
   created_at timestamp with time zone null default now(),
   updated_at timestamp with time zone null default now(),

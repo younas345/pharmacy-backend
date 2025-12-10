@@ -1847,10 +1847,16 @@ export interface ReturnReportGraphResponse {
 /**
  * Get matching return report records by distributor ID and NDC code
  * Groups results by report date and returns count of matched codes
+ * @param distributorId - Reverse distributor ID
+ * @param ndcCode - NDC code to search for
+ * @param pharmacyId - Optional pharmacy ID to filter by
+ * @param type - Optional type filter: 'full' to match records with full > 0, 'partial' to match records with partial > 0
  */
 export const getReturnReportsByDistributorAndNdc = async (
   distributorId: string,
-  ndcCode: string
+  ndcCode: string,
+  pharmacyId?: string,
+  type?: 'full' | 'partial'
 ): Promise<ReturnReportMatchResult[]> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
@@ -1859,10 +1865,17 @@ export const getReturnReportsByDistributorAndNdc = async (
   const db = supabaseAdmin;
 
   // Step 1: Get all document IDs for the specified distributor
-  const { data: documents, error: documentsError } = await db
+  let documentsQuery = db
     .from('uploaded_documents')
     .select('id, report_date')
     .eq('reverse_distributor_id', distributorId);
+
+  // Filter by pharmacy_id if provided
+  if (pharmacyId) {
+    documentsQuery = documentsQuery.eq('pharmacy_id', pharmacyId);
+  }
+
+  const { data: documents, error: documentsError } = await documentsQuery;
 
   if (documentsError) {
     throw new AppError(`Failed to fetch documents: ${documentsError.message}`, 400);
@@ -1879,11 +1892,18 @@ export const getReturnReportsByDistributorAndNdc = async (
   });
 
   // Step 2: Query return_reports for matching NDC codes and document IDs
-  const { data: returnReports, error } = await db
+  let returnReportsQuery = db
     .from('return_reports')
     .select('id, document_id, pharmacy_id, data, created_at')
     .in('document_id', documentIds)
     .eq('data->>ndcCode', ndcCode);
+
+  // Filter by pharmacy_id if provided
+  if (pharmacyId) {
+    returnReportsQuery = returnReportsQuery.eq('pharmacy_id', pharmacyId);
+  }
+
+  const { data: returnReports, error } = await returnReportsQuery;
 
   if (error) {
     throw new AppError(`Failed to fetch return reports: ${error.message}`, 400);
@@ -1893,10 +1913,33 @@ export const getReturnReportsByDistributorAndNdc = async (
     return [];
   }
 
+  // Step 3: Filter by type (full/partial) if specified
+  let filteredReports = returnReports;
+  if (type) {
+    filteredReports = returnReports.filter((report: any) => {
+      const reportData = report.data || {};
+      const full = Number(reportData.full) || 0;
+      const partial = Number(reportData.partial) || 0;
+
+      if (type === 'full') {
+        // Match records where full > 0
+        return full > 0;
+      } else if (type === 'partial') {
+        // Match records where partial > 0
+        return partial > 0;
+      }
+      return true;
+    });
+
+    if (filteredReports.length === 0) {
+      return [];
+    }
+  }
+
   // Group records by report_date
   const groupedByDate = new Map<string, ReturnReportMatchResult>();
 
-  returnReports.forEach((report: any) => {
+  filteredReports.forEach((report: any) => {
     const reportDate = documentMap.get(report.document_id) || null;
     const dateKey = reportDate || 'no-date';
     const reportData = report.data || {};
@@ -1923,22 +1966,45 @@ export const getReturnReportsByDistributorAndNdc = async (
     });
   });
 
-  // For each date group, keep only the record with the highest pricePerUnit
+  // For each date group, keep only the record with the highest value
+  // If type is specified, use max full/partial value; otherwise use max pricePerUnit
   groupedByDate.forEach((group, dateKey) => {
     if (group.records.length > 1) {
-      // Find the record with the maximum pricePerUnit
-      let maxPricePerUnit = -Infinity;
       let bestRecord = group.records[0];
+      
+      if (type === 'full') {
+        // Find the record with the maximum full value
+        let maxFull = -Infinity;
+        group.records.forEach((record) => {
+          const full = Number(record.data?.full) || 0;
+          if (full > maxFull) {
+            maxFull = full;
+            bestRecord = record;
+          }
+        });
+      } else if (type === 'partial') {
+        // Find the record with the maximum partial value
+        let maxPartial = -Infinity;
+        group.records.forEach((record) => {
+          const partial = Number(record.data?.partial) || 0;
+          if (partial > maxPartial) {
+            maxPartial = partial;
+            bestRecord = record;
+          }
+        });
+      } else {
+        // Default: Find the record with the maximum pricePerUnit
+        let maxPricePerUnit = -Infinity;
+        group.records.forEach((record) => {
+          const pricePerUnit = Number(record.data?.pricePerUnit) || 0;
+          if (pricePerUnit > maxPricePerUnit) {
+            maxPricePerUnit = pricePerUnit;
+            bestRecord = record;
+          }
+        });
+      }
 
-      group.records.forEach((record) => {
-        const pricePerUnit = Number(record.data?.pricePerUnit) || 0;
-        if (pricePerUnit > maxPricePerUnit) {
-          maxPricePerUnit = pricePerUnit;
-          bestRecord = record;
-        }
-      });
-
-      // Keep only the best record (the one with highest pricePerUnit)
+      // Keep only the best record
       group.records = [bestRecord];
       group.count = 1;
     } else if (group.records.length === 1) {
