@@ -13,7 +13,7 @@ router.use(authenticate);
  * /api/optimization/recommendations:
  *   get:
  *     summary: Get optimization recommendations for pharmacy products
- *     description: Analyzes product list items and matches them with return reports to find the best distributor prices and generate optimization recommendations. If ndc query parameter is provided, searches for those specific NDCs instead of pharmacy's product list.
+ *     description: Analyzes product list items and matches them with return reports to find the best distributor prices and generate optimization recommendations. If ndc query parameter is provided, searches for those specific NDCs instead of pharmacy's product list. When ndc is provided, at least one of FullCount or PartialCount must be provided to filter return reports by unit type.
  *     tags: [Optimization]
  *     security:
  *       - bearerAuth: []
@@ -22,8 +22,20 @@ router.use(authenticate);
  *         name: ndc
  *         schema:
  *           type: string
- *         description: Comma-separated NDC codes to search for. If provided, uses these NDCs instead of pharmacy's product list.
+ *         description: Comma-separated NDC codes to search for. If provided, uses these NDCs instead of pharmacy's product list. When provided, at least one of FullCount or PartialCount must also be provided.
  *         example: "42385097801,69315028209"
+ *       - in: query
+ *         name: FullCount
+ *         schema:
+ *           type: string
+ *         description: Comma-separated values matching NDC order. Filter return reports to only match records where full > 0 in the data field. Each value corresponds to the NDC at the same position. Must be provided along with ndc if PartialCount is not provided.
+ *         example: "10,0,5"
+ *       - in: query
+ *         name: PartialCount
+ *         schema:
+ *           type: string
+ *         description: Comma-separated values matching NDC order. Filter return reports to only match records where partial > 0 in the data field. Each value corresponds to the NDC at the same position. Must be provided along with ndc if FullCount is not provided.
+ *         example: "0,5,0"
  *     responses:
  *       200:
  *         description: Optimization recommendations retrieved successfully
@@ -38,7 +50,7 @@ router.use(authenticate);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       400:
- *         description: Bad request
+ *         description: Bad request - when ndc is provided, at least one of FullCount or PartialCount must be provided
  *         content:
  *           application/json:
  *             schema:

@@ -49,7 +49,9 @@ export interface OptimizationResponse {
 // Get optimization recommendations for pharmacy products
 export const getOptimizationRecommendations = async (
   pharmacyId: string,
-  searchNdcs?: string[]
+  searchNdcs?: string[],
+  fullCounts?: number[],
+  partialCounts?: number[]
 ): Promise<OptimizationResponse> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
@@ -61,6 +63,10 @@ export const getOptimizationRecommendations = async (
   let productItems: Array<{ id: string; ndc: string; product_name: string; quantity: number; lot_number?: string; expiration_date?: string }> = [];
   const isSearchMode = searchNdcs && searchNdcs.length > 0;
 
+  // Create a map of NDC to unit type requirement (for filtering return_reports)
+  // Key: normalized NDC (without dashes), Value: { requiresFull: boolean, requiresPartial: boolean }
+  const ndcUnitTypeMap: Map<string, { requiresFull: boolean; requiresPartial: boolean }> = new Map();
+
   // If NDC search parameter is provided, use those NDCs for partial matching
   if (isSearchMode) {
     // Use the provided NDCs for search (these are search terms, may be partial)
@@ -69,6 +75,18 @@ export const getOptimizationRecommendations = async (
     
     // Store search terms for later matching
     ndcs = searchTerms;
+    
+    // Build unit type map for each NDC
+    if (fullCounts || partialCounts) {
+      searchNdcs.forEach((originalNdc, index) => {
+        const normalizedNdc = String(originalNdc).replace(/-/g, '').trim();
+        const requiresFull = !!(fullCounts && fullCounts[index] !== undefined && fullCounts[index] !== null && fullCounts[index] > 0);
+        const requiresPartial = !!(partialCounts && partialCounts[index] !== undefined && partialCounts[index] !== null && partialCounts[index] > 0);
+        
+        ndcUnitTypeMap.set(normalizedNdc, { requiresFull, requiresPartial });
+        console.log(`📋 NDC ${originalNdc} (normalized: ${normalizedNdc}): requiresFull=${requiresFull}, requiresPartial=${requiresPartial}`);
+      });
+    }
     
     // In search mode, we don't fetch from product_list_items
     // productName and quantity will be extracted from return_reports during processing
@@ -147,6 +165,18 @@ export const getOptimizationRecommendations = async (
       const normalized = String(searchNdc).replace(/-/g, '').trim();
       const withDashes = String(searchNdc).trim();
       
+      // Helper function to format NDC with dashes (5-4-2 format, most common)
+      const formatNdcWithDashes = (ndc: string): string => {
+        const clean = ndc.replace(/-/g, '');
+        if (clean.length === 11) {
+          return `${clean.slice(0, 5)}-${clean.slice(5, 9)}-${clean.slice(9)}`;
+        }
+        return ndc;
+      };
+      
+      // Generate dashed version if the input is without dashes
+      const dashedFormat = formatNdcWithDashes(normalized);
+      
       // Use ilike for partial matching (like SQL LIKE '%pattern%')
       // For JSONB fields, use the correct PostgREST syntax
       // This will match: "00456-0460-01", "00456046001", "00456-0460-01-extra", etc.
@@ -154,11 +184,19 @@ export const getOptimizationRecommendations = async (
       if (normalized !== withDashes) {
         orConditions.push(`data->>ndcCode.ilike.%${normalized}%`);
       }
+      // Also search for the dashed format
+      if (dashedFormat !== withDashes && dashedFormat !== normalized) {
+        orConditions.push(`data->>ndcCode.ilike.%${dashedFormat}%`);
+      }
       
       // Also try matching 'ndc' field if it exists
       orConditions.push(`data->>ndc.ilike.%${withDashes}%`);
       if (normalized !== withDashes) {
         orConditions.push(`data->>ndc.ilike.%${normalized}%`);
+      }
+      // Also search for the dashed format in 'ndc' field
+      if (dashedFormat !== withDashes && dashedFormat !== normalized) {
+        orConditions.push(`data->>ndc.ilike.%${dashedFormat}%`);
       }
     });
     
@@ -335,13 +373,6 @@ export const getOptimizationRecommendations = async (
       // Try different possible field names for NDC
       const ndcCode = item.ndcCode || item.ndc;
       
-      if (isSearchMode) {
-        console.log(`   📦 Processing item ${itemIndex + 1}/${items.length}`);
-        console.log(`   Item keys:`, Object.keys(item || {}));
-        console.log(`   Item.ndcCode:`, item.ndcCode);
-        console.log(`   Item.ndc:`, item.ndc);
-      }
-      
       if (!ndcCode) {
         if (isSearchMode) {
           console.log(`   ⚠️ No NDC found in item ${itemIndex + 1}. Item keys:`, Object.keys(item || {}));
@@ -352,8 +383,60 @@ export const getOptimizationRecommendations = async (
       // Normalize NDC for comparison (remove dashes and convert to string)
       const normalizedNdcCode = String(ndcCode).replace(/-/g, '').trim();
       
-      // Debug logging for search mode
+      // Filter by full and partial if query parameters are provided and we have unit type requirements
+      if (isSearchMode && ndcUnitTypeMap.size > 0) {
+        // Get full and partial from item data (return_reports uses "full" and "partial" fields)
+        const itemFull = Number(item.full) || 0;
+        const itemPartial = Number(item.partial) || 0;
+        
+        // Find which NDC this item matches and get its unit type requirement
+        let unitTypeRequirement: { requiresFull: boolean; requiresPartial: boolean } | undefined;
+        
+        // Check if this normalized NDC matches any search term
+        for (const [normalizedSearchNdc, requirement] of ndcUnitTypeMap.entries()) {
+          if (normalizedNdcCode === normalizedSearchNdc) {
+            unitTypeRequirement = requirement;
+            break;
+          }
+        }
+        
+        // If we have a requirement for this NDC, apply the filter
+        if (unitTypeRequirement) {
+          const { requiresFull, requiresPartial } = unitTypeRequirement;
+          
+          // If requiresFull, only match records where full > 0 and partial = 0
+          if (requiresFull) {
+            if (itemFull === 0 || itemPartial > 0) {
+              // Skip: full is 0 or partial > 0 (doesn't match FullCount requirement)
+              if (isSearchMode) {
+                console.log(`   ⏭️ Skipping item - FullCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need full > 0 and partial = 0)`);
+              }
+              return;
+            }
+          }
+          
+          // If requiresPartial, only match records where partial > 0 and full = 0
+          if (requiresPartial) {
+            if (itemPartial === 0 || itemFull > 0) {
+              // Skip: partial is 0 or full > 0 (doesn't match PartialCount requirement)
+              if (isSearchMode) {
+                console.log(`   ⏭️ Skipping item - PartialCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need partial > 0 and full = 0)`);
+              }
+              return;
+            }
+          }
+          
+          if (isSearchMode) {
+            console.log(`   ✅ Item passed unit filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial}`);
+          }
+        }
+      }
+      
       if (isSearchMode) {
+        console.log(`   📦 Processing item ${itemIndex + 1}/${items.length}`);
+        console.log(`   Item keys:`, Object.keys(item || {}));
+        console.log(`   Item.ndcCode:`, item.ndcCode);
+        console.log(`   Item.ndc:`, item.ndc);
         console.log(`   🔍 Checking NDC: "${ndcCode}" (normalized: "${normalizedNdcCode}") against search terms:`, ndcs);
       }
       
