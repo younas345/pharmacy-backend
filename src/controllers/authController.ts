@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { signup, signin, refreshToken } from '../services/authService';
+import { signup, signin, refreshToken, logout, logoutAll } from '../services/authService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
 
@@ -60,3 +60,36 @@ export const refreshTokenHandler = catchAsync(
   }
 );
 
+export const logoutHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { refreshToken: refreshTokenValue } = req.body;
+
+    // Logout - revoke the provided refresh token
+    if (refreshTokenValue) {
+      await logout(refreshTokenValue);
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Logged out successfully',
+    });
+  }
+);
+
+export const logoutAllHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    // This requires authentication to know which user to log out
+    const pharmacyId = req.pharmacyId;
+
+    if (!pharmacyId) {
+      throw new AppError('Authentication required', 401);
+    }
+
+    await logoutAll(pharmacyId);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Logged out from all devices successfully',
+    });
+  }
+);

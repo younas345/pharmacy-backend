@@ -1,9 +1,14 @@
 import { supabase, supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
+import crypto from 'crypto';
 
 // Use admin client for backend operations (bypasses RLS)
 // Fallback to regular client if admin is not configured
 const db = supabaseAdmin || supabase;
+
+// Constants for token configuration
+const REFRESH_TOKEN_EXPIRY_DAYS = 30; // Custom refresh tokens last 30 days
+const ACCESS_TOKEN_EXPIRY_SECONDS = 3600; // Access tokens expire in 1 hour
 
 export interface SignupData {
   email: string;
@@ -22,12 +27,205 @@ export interface AuthResponse {
   user: any;
   token: string;
   refreshToken: string;
-  session: any;
+  expiresIn: number;
+  expiresAt: number;
 }
 
 export interface RefreshTokenData {
   refreshToken: string;
 }
+
+/**
+ * Generate a secure random refresh token
+ */
+const generateRefreshToken = (): string => {
+  // Generate a cryptographically secure random token
+  const randomBytes = crypto.randomBytes(64);
+  const token = randomBytes.toString('base64url');
+  return `prt_${token}`; // prefix to identify our custom tokens (pharmacy refresh token)
+};
+
+/**
+ * Hash a refresh token for secure storage
+ * We never store raw tokens in the database
+ */
+const hashToken = (token: string): string => {
+  return crypto.createHash('sha256').update(token).digest('hex');
+};
+
+/**
+ * Store a refresh token in the database
+ */
+const storeRefreshToken = async (
+  pharmacyId: string,
+  token: string,
+  userAgent?: string,
+  ipAddress?: string
+): Promise<void> => {
+  const tokenHash = hashToken(token);
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
+
+  const { error } = await db
+    .from('refresh_tokens')
+    .insert({
+      pharmacy_id: pharmacyId,
+      token_hash: tokenHash,
+      expires_at: expiresAt.toISOString(),
+      user_agent: userAgent || null,
+      ip_address: ipAddress || null,
+    });
+
+  if (error) {
+    console.error('Failed to store refresh token:', error);
+    throw new AppError('Failed to create session', 500);
+  }
+};
+
+/**
+ * Validate and retrieve refresh token data from database
+ */
+const validateRefreshToken = async (token: string): Promise<{ pharmacyId: string; tokenId: string } | null> => {
+  const tokenHash = hashToken(token);
+
+  const { data, error } = await db
+    .from('refresh_tokens')
+    .select('id, pharmacy_id, expires_at, revoked_at')
+    .eq('token_hash', tokenHash)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  // Check if token is revoked
+  if (data.revoked_at) {
+    return null;
+  }
+
+  // Check if token is expired
+  const expiresAt = new Date(data.expires_at);
+  if (expiresAt < new Date()) {
+    return null;
+  }
+
+  // Update last_used_at
+  await db
+    .from('refresh_tokens')
+    .update({ last_used_at: new Date().toISOString() })
+    .eq('id', data.id);
+
+  return {
+    pharmacyId: data.pharmacy_id,
+    tokenId: data.id,
+  };
+};
+
+/**
+ * Revoke a specific refresh token
+ */
+const revokeRefreshToken = async (tokenId: string): Promise<void> => {
+  await db
+    .from('refresh_tokens')
+    .update({ revoked_at: new Date().toISOString() })
+    .eq('id', tokenId);
+};
+
+/**
+ * Revoke all refresh tokens for a pharmacy (useful for logout all devices)
+ * This actually deletes the tokens from the database
+ */
+export const revokeAllRefreshTokens = async (pharmacyId: string): Promise<void> => {
+  const { error } = await db
+    .from('refresh_tokens')
+    .delete()
+    .eq('pharmacy_id', pharmacyId);
+
+  if (error) {
+    console.error('Failed to revoke all refresh tokens:', error);
+    // Don't throw error - allow login to continue even if cleanup fails
+  }
+};
+
+/**
+ * Clean up expired tokens (can be called periodically)
+ */
+export const cleanupExpiredTokens = async (): Promise<number> => {
+  const { data, error } = await db
+    .from('refresh_tokens')
+    .delete()
+    .or(`expires_at.lt.${new Date().toISOString()},revoked_at.not.is.null`)
+    .select('id');
+
+  if (error) {
+    console.error('Failed to cleanup expired tokens:', error);
+    return 0;
+  }
+
+  return data?.length || 0;
+};
+
+/**
+ * Generate access token using Supabase admin API
+ * This creates a new session for the user
+ */
+const generateAccessToken = async (userId: string): Promise<{ accessToken: string; expiresIn: number; expiresAt: number }> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  // Get user details
+  const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
+  
+  if (userError || !userData?.user) {
+    throw new AppError('User not found', 404);
+  }
+
+  // Generate a magic link that we can use to create a session
+  // This is a workaround since Supabase doesn't have a direct "generate token for user" admin API
+  // Instead, we'll use the generateLink with OTP type
+  const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+    type: 'magiclink',
+    email: userData.user.email!,
+  });
+
+  if (linkError || !linkData?.properties?.hashed_token) {
+    // Fallback: Try to verify OTP directly
+    // This is a workaround - we'll generate our own JWT
+    throw new AppError('Failed to generate access token', 500);
+  }
+
+  // Extract the token from the magic link and verify it to get a session
+  // The hashed_token can be used with verifyOtp
+  const { data: sessionData, error: sessionError } = await supabase.auth.verifyOtp({
+    token_hash: linkData.properties.hashed_token,
+    type: 'magiclink',
+  });
+
+  if (sessionError || !sessionData?.session) {
+    throw new AppError('Failed to create session', 500);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const expiresAt = now + ACCESS_TOKEN_EXPIRY_SECONDS;
+
+  return {
+    accessToken: sessionData.session.access_token,
+    expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS,
+    expiresAt,
+  };
+};
+
+/**
+ * Calculate expiration times for the response
+ */
+const calculateExpiry = (): { expiresIn: number; expiresAt: number } => {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS,
+    expiresAt: now + ACCESS_TOKEN_EXPIRY_SECONDS,
+  };
+};
 
 export const signup = async (data: SignupData): Promise<AuthResponse> => {
   const { email, password, name, pharmacyName, phone } = data;
@@ -76,7 +274,7 @@ export const signup = async (data: SignupData): Promise<AuthResponse> => {
     throw new AppError(pharmacyError.message || 'Failed to create pharmacy profile', 400);
   }
 
-  // Step 3: Sign in the user to get session (use regular client for session)
+  // Step 3: Sign in the user to get Supabase session (for initial access token)
   const { data: sessionData, error: sessionError } = await supabase.auth.signInWithPassword({
     email,
     password,
@@ -86,11 +284,18 @@ export const signup = async (data: SignupData): Promise<AuthResponse> => {
     throw new AppError('Failed to create session', 500);
   }
 
+  // Step 4: Generate and store our custom long-lived refresh token
+  const customRefreshToken = generateRefreshToken();
+  await storeRefreshToken(authUserId, customRefreshToken);
+
+  const { expiresIn, expiresAt } = calculateExpiry();
+
   return {
     user: pharmacyData,
     token: sessionData.session.access_token,
-    refreshToken: sessionData.session.refresh_token,
-    session: sessionData.session,
+    refreshToken: customRefreshToken, // Return our custom refresh token
+    expiresIn,
+    expiresAt,
   };
 };
 
@@ -120,48 +325,32 @@ export const signin = async (data: SigninData): Promise<AuthResponse> => {
     throw new AppError('Pharmacy profile not found', 404);
   }
 
+  // Step 3: Revoke all existing refresh tokens (logout from all devices)
+  // This ensures that when a user logs in, all previous sessions are invalidated
+  await revokeAllRefreshTokens(authUserId);
+
+  // Step 4: Generate and store our custom long-lived refresh token
+  const customRefreshToken = generateRefreshToken();
+  await storeRefreshToken(authUserId, customRefreshToken);
+
+  const { expiresIn, expiresAt } = calculateExpiry();
+
   return {
     user: pharmacyData,
     token: authData.session.access_token,
-    refreshToken: authData.session.refresh_token,
-    session: authData.session,
+    refreshToken: customRefreshToken, // Return our custom refresh token
+    expiresIn,
+    expiresAt,
   };
 };
 
-interface SupabaseTokenResponse {
-  access_token: string;
-  refresh_token?: string;
-  expires_in?: number;
-  expires_at?: number;
-  token_type?: string;
-  user: {
-    id: string;
-    email?: string;
-    [key: string]: any;
-  };
-}
-
-interface SupabaseErrorResponse {
-  error?: string;
-  error_description?: string;
-  [key: string]: any;
-}
-
 /**
- * Refresh access token using refresh token
+ * Refresh access token using our custom refresh token
  * 
- * IMPORTANT: Refresh tokens should have a longer expiration than access tokens.
- * - Access tokens typically expire in 1 hour
- * - Refresh tokens should expire in 7 days (default Supabase configuration)
- * 
- * If refresh tokens are expiring at the same time as access tokens, check your
- * Supabase project settings:
- * - Go to Supabase Dashboard > Authentication > Settings
- * - Verify "JWT expiry" and "Refresh token expiry" settings
- * - Refresh token expiry should be significantly longer than JWT expiry
- * 
- * This function exchanges a refresh token for a new access token and refresh token.
- * The new refresh token should be used for subsequent refreshes.
+ * This function:
+ * 1. Validates the custom refresh token against our database
+ * 2. Creates a new Supabase session for the user
+ * 3. Optionally rotates the refresh token for added security
  */
 export const refreshToken = async (data: RefreshTokenData): Promise<AuthResponse> => {
   const { refreshToken: refreshTokenValue } = data;
@@ -170,97 +359,95 @@ export const refreshToken = async (data: RefreshTokenData): Promise<AuthResponse
     throw new AppError('Refresh token is required', 400);
   }
 
-  // Use Supabase REST API to refresh the token
-  // This is the proper way to refresh tokens server-side
-  // The refresh token should remain valid even after the access token expires
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+  // Validate our custom refresh token
+  const tokenData = await validateRefreshToken(refreshTokenValue);
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new AppError('Supabase configuration missing', 500);
+  if (!tokenData) {
+    throw new AppError('Invalid or expired refresh token. Please sign in again.', 401);
   }
 
-  try {
-    // Call Supabase Auth REST API to exchange refresh token for new session
-    // The refresh token should remain valid even after access token expires
-    const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': supabaseAnonKey,
-        'Authorization': `Bearer ${supabaseAnonKey}`,
-      },
-      body: JSON.stringify({
-        refresh_token: refreshTokenValue,
-      }),
-    });
+  const { pharmacyId, tokenId } = tokenData;
 
-    if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as SupabaseErrorResponse;
-      const errorMessage = errorData.error_description || errorData.error || 'Invalid or expired refresh token';
-      
-      // Provide more specific error message
-      if (errorData.error === 'invalid_grant' || errorMessage.includes('expired')) {
-        throw new AppError('Refresh token has expired. Please sign in again.', 401);
-      }
-      throw new AppError(errorMessage, 401);
-    }
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
 
-    const sessionData = (await response.json()) as SupabaseTokenResponse;
+  // Fetch the pharmacy user to get their email
+  const { data: pharmacyData, error: pharmacyError } = await db
+    .from('pharmacy')
+    .select('*')
+    .eq('id', pharmacyId)
+    .single();
 
-    if (!sessionData.access_token || !sessionData.user || !sessionData.user.id) {
-      throw new AppError('Invalid refresh token response', 401);
-    }
+  if (pharmacyError || !pharmacyData) {
+    // Revoke the token since the user no longer exists
+    await revokeRefreshToken(tokenId);
+    throw new AppError('Pharmacy profile not found', 404);
+  }
 
-    const authUserId = sessionData.user.id;
+  // Get user details from Supabase Auth
+  const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(pharmacyId);
 
-    // Fetch pharmacy profile to ensure user still exists
-    const { data: pharmacyData, error: pharmacyError } = await db
-      .from('pharmacy')
-      .select('*')
-      .eq('id', authUserId)
-      .single();
+  if (userError || !userData?.user) {
+    await revokeRefreshToken(tokenId);
+    throw new AppError('User account not found', 404);
+  }
 
-    if (pharmacyError || !pharmacyData) {
-      throw new AppError('Pharmacy profile not found', 404);
-    }
+  // Generate a new access token using magic link verification
+  // This is the recommended way to create a session for a user programmatically
+  const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+    type: 'magiclink',
+    email: userData.user.email!,
+  });
 
-    // Supabase should always return a new refresh token when refreshing
-    // Use the new refresh token, not the old one
-    // This ensures the refresh token remains valid for its full lifetime
-    const newRefreshToken = sessionData.refresh_token;
-    
-    if (!newRefreshToken) {
-      // If Supabase doesn't return a new refresh token, log a warning but continue
-      // This should not happen in normal operation
-      console.warn('Supabase did not return a new refresh token. Using the provided refresh token as fallback.');
-    }
+  if (linkError || !linkData?.properties?.hashed_token) {
+    throw new AppError('Failed to generate access token', 500);
+  }
 
-    // Construct session object in the format expected by the client
-    const session = {
-      access_token: sessionData.access_token,
-      refresh_token: newRefreshToken || refreshTokenValue,
-      expires_in: sessionData.expires_in,
-      expires_at: sessionData.expires_at,
-      token_type: sessionData.token_type || 'bearer',
-      user: sessionData.user,
-    };
+  // Verify the magic link to get a session
+  const { data: sessionData, error: sessionError } = await supabase.auth.verifyOtp({
+    token_hash: linkData.properties.hashed_token,
+    type: 'magiclink',
+  });
 
-    return {
-      user: pharmacyData,
-      token: sessionData.access_token,
-      // Always use the new refresh token if provided, otherwise fallback to the old one
-      // This ensures refresh tokens can be used multiple times until they expire
-      refreshToken: newRefreshToken || refreshTokenValue,
-      session,
-    };
-  } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-    // Provide more descriptive error message
-    const errorMessage = error instanceof Error ? error.message : 'Failed to refresh token';
-    throw new AppError(`Failed to refresh token: ${errorMessage}`, 401);
+  if (sessionError || !sessionData?.session) {
+    throw new AppError('Failed to create new session', 500);
+  }
+
+  // Token rotation: Generate a new refresh token and revoke the old one
+  // This provides better security as each refresh token can only be used once
+  const newRefreshToken = generateRefreshToken();
+  await storeRefreshToken(pharmacyId, newRefreshToken);
+  await revokeRefreshToken(tokenId);
+
+  const { expiresIn, expiresAt } = calculateExpiry();
+
+  return {
+    user: pharmacyData,
+    token: sessionData.session.access_token,
+    refreshToken: newRefreshToken, // Return the new rotated refresh token
+    expiresIn,
+    expiresAt,
+  };
+};
+
+/**
+ * Logout - revoke the current refresh token
+ */
+export const logout = async (refreshTokenValue: string): Promise<void> => {
+  if (!refreshTokenValue) {
+    return; // No token to revoke
+  }
+
+  const tokenData = await validateRefreshToken(refreshTokenValue);
+  if (tokenData) {
+    await revokeRefreshToken(tokenData.tokenId);
   }
 };
 
+/**
+ * Logout from all devices - revoke all refresh tokens for a user
+ */
+export const logoutAll = async (pharmacyId: string): Promise<void> => {
+  await revokeAllRefreshTokens(pharmacyId);
+};
