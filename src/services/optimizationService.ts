@@ -60,7 +60,7 @@ export const getOptimizationRecommendations = async (
   const db = supabaseAdmin;
 
   let ndcs: string[] = [];
-  let productItems: Array<{ id: string; ndc: string; product_name: string; quantity: number; lot_number?: string; expiration_date?: string }> = [];
+  let productItems: Array<{ id: string; ndc: string; product_name: string; quantity: number; full_units?: number; partial_units?: number; lot_number?: string; expiration_date?: string }> = [];
   const isSearchMode = searchNdcs && searchNdcs.length > 0;
 
   // Create a map of NDC to unit type requirement (for filtering return_reports)
@@ -94,10 +94,10 @@ export const getOptimizationRecommendations = async (
     productItems = [];
     console.log(`📋 Search mode: Skipping pharmacy inventory, will use return_reports data only`);
   } else {
-    // Step 1: Get all product list items for this pharmacy
+    // Step 1: Get all product list items for this pharmacy (including full_units and partial_units)
     const { data: items, error: itemsError } = await db
       .from('product_list_items')
-      .select('id, ndc, product_name, quantity, lot_number, expiration_date')
+      .select('id, ndc, product_name, full_units, partial_units, lot_number, expiration_date')
       .eq('added_by', pharmacyId);
 
     if (itemsError) {
@@ -130,9 +130,40 @@ export const getOptimizationRecommendations = async (
       };
     }
 
-    productItems = items;
+    // Map items to include quantity (sum of full_units and partial_units) and unit fields
+    productItems = items.map((item: any) => ({
+      id: item.id,
+      ndc: item.ndc,
+      product_name: item.product_name,
+      quantity: (Number(item.full_units) || 0) + (Number(item.partial_units) || 0), // Sum for quantity
+      full_units: Number(item.full_units) || 0,
+      partial_units: Number(item.partial_units) || 0,
+      lot_number: item.lot_number,
+      expiration_date: item.expiration_date,
+    }));
+    
     // Step 2: Extract unique NDCs
     ndcs = [...new Set(productItems.map((item) => item.ndc))];
+    
+    // Build unit type map for each NDC based on inventory
+    // If partial_units = 0, then requiresFull = true (match full > 0 records)
+    // If full_units = 0, then requiresPartial = true (match partial > 0 records)
+    productItems.forEach((inventoryItem) => {
+      const normalizedNdc = String(inventoryItem.ndc).replace(/-/g, '').trim();
+      const fullUnits = inventoryItem.full_units || 0;
+      const partialUnits = inventoryItem.partial_units || 0;
+      
+      // If partial_units = 0, then it's a full unit item (match full > 0 records)
+      const requiresFull = partialUnits === 0 && fullUnits > 0;
+      // If full_units = 0, then it's a partial unit item (match partial > 0 records)
+      const requiresPartial = fullUnits === 0 && partialUnits > 0;
+      
+      // Only set if we have a requirement (one of them must be true based on the constraint)
+      if (requiresFull || requiresPartial) {
+        ndcUnitTypeMap.set(normalizedNdc, { requiresFull, requiresPartial });
+        console.log(`📋 Inventory NDC ${inventoryItem.ndc} (normalized: ${normalizedNdc}): full_units=${fullUnits}, partial_units=${partialUnits} → requiresFull=${requiresFull}, requiresPartial=${requiresPartial}`);
+      }
+    });
   }
 
   // Step 3: Search return_reports for matching NDCs
@@ -383,8 +414,8 @@ export const getOptimizationRecommendations = async (
       // Normalize NDC for comparison (remove dashes and convert to string)
       const normalizedNdcCode = String(ndcCode).replace(/-/g, '').trim();
       
-      // Filter by full and partial if query parameters are provided and we have unit type requirements
-      if (isSearchMode && ndcUnitTypeMap.size > 0) {
+      // Filter by full and partial if we have unit type requirements (both search mode and inventory mode)
+      if (ndcUnitTypeMap.size > 0) {
         // Get full and partial from item data (return_reports uses "full" and "partial" fields)
         const itemFull = Number(item.full) || 0;
         const itemPartial = Number(item.partial) || 0;
@@ -507,6 +538,49 @@ export const getOptimizationRecommendations = async (
           ndcPricingMap[actualNdcKey] = [];
         }
       } else {
+        // Non-search mode: filter by unit type based on inventory
+        if (ndcUnitTypeMap.size > 0) {
+          // Get full and partial from item data (return_reports uses "full" and "partial" fields)
+          const itemFull = Number(item.full) || 0;
+          const itemPartial = Number(item.partial) || 0;
+          
+          // Find which NDC this item matches and get its unit type requirement
+          let unitTypeRequirement: { requiresFull: boolean; requiresPartial: boolean } | undefined;
+          
+          // Check if this normalized NDC matches any inventory NDC
+          for (const [normalizedInventoryNdc, requirement] of ndcUnitTypeMap.entries()) {
+            if (normalizedNdcCode === normalizedInventoryNdc) {
+              unitTypeRequirement = requirement;
+              break;
+            }
+          }
+          
+          // If we have a requirement for this NDC, apply the filter
+          if (unitTypeRequirement) {
+            const { requiresFull, requiresPartial } = unitTypeRequirement;
+            
+            // If requiresFull, only match records where full > 0 and partial = 0
+            if (requiresFull) {
+              if (itemFull === 0 || itemPartial > 0) {
+                // Skip: full is 0 or partial > 0 (doesn't match FullCount requirement)
+                console.log(`   ⏭️ Skipping item - FullCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need full > 0 and partial = 0)`);
+                return;
+              }
+            }
+            
+            // If requiresPartial, only match records where partial > 0 and full = 0
+            if (requiresPartial) {
+              if (itemPartial === 0 || itemFull > 0) {
+                // Skip: partial is 0 or full > 0 (doesn't match PartialCount requirement)
+                console.log(`   ⏭️ Skipping item - PartialCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need partial > 0 and full = 0)`);
+                return;
+              }
+            }
+            
+            console.log(`   ✅ Item passed unit filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial}`);
+          }
+        }
+        
         // Exact match mode: use pre-computed lookup map for O(1) access
         matchingNdc = normalizedNdcLookup.get(normalizedNdcCode);
         
