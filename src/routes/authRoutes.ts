@@ -1,5 +1,6 @@
 import express from 'express';
-import { signupHandler, signinHandler, refreshTokenHandler } from '../controllers/authController';
+import { signupHandler, signinHandler, refreshTokenHandler, logoutHandler, logoutAllHandler } from '../controllers/authController';
+import { authenticate } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -8,7 +9,7 @@ const router = express.Router();
  * /api/auth/signup:
  *   post:
  *     summary: Register a new pharmacy user with Supabase Auth
- *     description: Creates a new user in Supabase Auth and links it to a pharmacy profile. Returns Supabase session tokens for authentication.
+ *     description: Creates a new user in Supabase Auth and links it to a pharmacy profile. Returns access token and custom refresh token for authentication.
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -52,7 +53,7 @@ router.post('/signup', signupHandler);
  * /api/auth/signin:
  *   post:
  *     summary: Login with email and password using Supabase Auth
- *     description: Authenticates user with Supabase Auth and returns session tokens. The access token can be used for subsequent API requests.
+ *     description: Authenticates user with Supabase Auth and returns access token and custom refresh token. The access token expires in 1 hour, while the refresh token is valid for 30 days.
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -101,25 +102,24 @@ router.post('/signin', signinHandler);
  * @swagger
  * /api/auth/refresh:
  *   post:
- *     summary: Refresh access token using refresh token
- *     description: Uses a refresh token to obtain a new access token and refresh token. This should be called when the access token expires (typically after 1 hour).
+ *     summary: Refresh access token using custom refresh token
+ *     description: |
+ *       Uses a custom refresh token to obtain a new access token. 
+ *       
+ *       **Important:** 
+ *       - Custom refresh tokens are valid for 30 days (independent of Supabase session expiry)
+ *       - Tokens are rotated on each refresh - always use the new refresh token from the response
+ *       - Each refresh token can only be used once for security
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - refreshToken
- *             properties:
- *               refreshToken:
- *                 type: string
- *                 example: 'v1.abc123def456...'
- *                 description: Refresh token obtained from signin or signup response
+ *             $ref: '#/components/schemas/RefreshTokenRequest'
  *     responses:
  *       200:
- *         description: Token successfully refreshed
+ *         description: Token successfully refreshed. Returns new access token and rotated refresh token.
  *         content:
  *           application/json:
  *             schema:
@@ -132,7 +132,7 @@ router.post('/signin', signinHandler);
  *               $ref: '#/components/schemas/ErrorResponse'
  *             example:
  *               status: 'fail'
- *               message: 'Invalid or expired refresh token'
+ *               message: 'Invalid or expired refresh token. Please sign in again.'
  *       400:
  *         description: Bad request - refresh token not provided
  *         content:
@@ -151,5 +151,58 @@ router.post('/signin', signinHandler);
  */
 router.post('/refresh', refreshTokenHandler);
 
-export default router;
+/**
+ * @swagger
+ * /api/auth/logout:
+ *   post:
+ *     summary: Logout and revoke refresh token
+ *     description: Revokes the provided refresh token, preventing it from being used to obtain new access tokens. Client should also clear local token storage.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/LogoutRequest'
+ *     responses:
+ *       200:
+ *         description: Logged out successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LogoutResponse'
+ */
+router.post('/logout', logoutHandler);
 
+/**
+ * @swagger
+ * /api/auth/logout-all:
+ *   post:
+ *     summary: Logout from all devices
+ *     description: Revokes all refresh tokens for the authenticated user, effectively logging them out from all devices. Requires authentication.
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logged out from all devices successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LogoutResponse'
+ *             example:
+ *               status: 'success'
+ *               message: 'Logged out from all devices successfully'
+ *       401:
+ *         description: Unauthorized - no valid access token provided
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               status: 'fail'
+ *               message: 'Authentication required'
+ */
+router.post('/logout-all', authenticate, logoutAllHandler);
+
+export default router;

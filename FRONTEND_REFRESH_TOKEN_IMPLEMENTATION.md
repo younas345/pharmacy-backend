@@ -4,11 +4,22 @@
 
 This guide explains how to implement the refresh token mechanism on the frontend to handle automatic token refresh when access tokens expire.
 
+## ⚠️ IMPORTANT: Custom Refresh Token System
+
+This backend uses a **custom refresh token system** that is **independent of Supabase session expiry**. This means:
+
+- **Access tokens** expire after **1 hour** (Supabase JWT)
+- **Custom refresh tokens** expire after **30 days** (stored in our database)
+- Refresh tokens are **rotated** on each use (one-time use for security)On 
+- Refresh tokens start with the prefix `prt_` (pharmacy refresh token)
+
 ## API Endpoints
 
 - **Login**: `POST /api/auth/signin`
 - **Signup**: `POST /api/auth/signup`
 - **Refresh Token**: `POST /api/auth/refresh`
+- **Logout**: `POST /api/auth/logout`
+- **Logout All Devices**: `POST /api/auth/logout-all` (requires auth)
 
 ## Response Structure
 
@@ -19,9 +30,10 @@ All auth endpoints return the same structure:
   "status": "success",
   "data": {
     "user": { ... },
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",  // Access token (expires in ~1 hour)
-    "refreshToken": "v1.abc123def456...",                // Refresh token (expires in ~7 days)
-    "session": { ... }
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",  // Access token (expires in 1 hour)
+    "refreshToken": "prt_abc123def456...",               // Custom refresh token (expires in 30 days)
+    "expiresIn": 3600,                                   // Seconds until access token expires
+    "expiresAt": 1705324000                              // Unix timestamp when access token expires
   }
 }
 ```
@@ -43,6 +55,9 @@ const { data } = await response.json();
 // Store tokens securely
 localStorage.setItem('accessToken', data.token);
 localStorage.setItem('refreshToken', data.refreshToken);
+
+// Optionally store expiration time for proactive refresh
+localStorage.setItem('tokenExpiresAt', data.expiresAt.toString());
 ```
 
 ### 2. Create API Client with Auto-Refresh
@@ -51,16 +66,35 @@ localStorage.setItem('refreshToken', data.refreshToken);
 // apiClient.ts
 class ApiClient {
   private baseURL: string;
+  private isRefreshing = false;
+  private failedQueue: Array<{ resolve: (value: string) => void; reject: (error: any) => void }> = [];
   
   constructor(baseURL: string) {
     this.baseURL = baseURL;
+  }
+
+  private processQueue(error: any, token: string | null = null) {
+    this.failedQueue.forEach(prom => {
+      if (error) {
+        prom.reject(error);
+      } else {
+        prom.resolve(token!);
+      }
+    });
+    this.failedQueue = [];
   }
 
   private async refreshAccessToken(): Promise<string | null> {
     const refreshToken = localStorage.getItem('refreshToken');
     
     if (!refreshToken) {
-      // No refresh token, user needs to login again
+      this.clearAuth();
+      return null;
+    }
+
+    // Check if refresh token looks valid (has our prefix)
+    if (!refreshToken.startsWith('prt_')) {
+      console.warn('Invalid refresh token format');
       this.clearAuth();
       return null;
     }
@@ -73,16 +107,16 @@ class ApiClient {
       });
 
       if (!response.ok) {
-        // Refresh token expired or invalid
         this.clearAuth();
         return null;
       }
 
       const { data } = await response.json();
       
-      // Update stored tokens
+      // IMPORTANT: Update both tokens - refresh token is rotated!
       localStorage.setItem('accessToken', data.token);
       localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem('tokenExpiresAt', data.expiresAt.toString());
       
       return data.token;
     } catch (error) {
@@ -95,7 +129,7 @@ class ApiClient {
   private clearAuth() {
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
-    // Redirect to login page
+    localStorage.removeItem('tokenExpiresAt');
     window.location.href = '/login';
   }
 
@@ -103,11 +137,27 @@ class ApiClient {
     return localStorage.getItem('accessToken');
   }
 
+  private isTokenExpired(): boolean {
+    const expiresAt = localStorage.getItem('tokenExpiresAt');
+    if (!expiresAt) return true;
+    
+    // Add 60 second buffer to prevent edge cases
+    return Date.now() / 1000 > parseInt(expiresAt) - 60;
+  }
+
   async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
     let token = this.getAccessToken();
+
+    // Proactively refresh if token is about to expire
+    if (token && this.isTokenExpired()) {
+      token = await this.refreshAccessToken();
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+    }
 
     // Make initial request
     let response = await fetch(`${this.baseURL}${endpoint}`, {
@@ -121,9 +171,28 @@ class ApiClient {
 
     // If token expired (401), try to refresh
     if (response.status === 401 && token) {
+      // Handle concurrent requests during refresh
+      if (this.isRefreshing) {
+        return new Promise((resolve, reject) => {
+          this.failedQueue.push({ resolve, reject });
+        }).then((newToken) => {
+          return fetch(`${this.baseURL}${endpoint}`, {
+            ...options,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${newToken}`,
+              ...options.headers,
+            },
+          }).then(res => res.json());
+        });
+      }
+
+      this.isRefreshing = true;
       const newToken = await this.refreshAccessToken();
+      this.isRefreshing = false;
       
       if (newToken) {
+        this.processQueue(null, newToken);
         // Retry original request with new token
         response = await fetch(`${this.baseURL}${endpoint}`, {
           ...options,
@@ -134,7 +203,7 @@ class ApiClient {
           },
         });
       } else {
-        // Refresh failed, user needs to login
+        this.processQueue(new Error('Refresh failed'), null);
         throw new Error('Authentication required');
       }
     }
@@ -178,18 +247,31 @@ export const apiClient = new ApiClient(process.env.REACT_APP_API_URL || 'http://
 
 ```typescript
 // hooks/useApi.ts
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 export const useApi = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isRefreshing = useRef(false);
+  const failedQueue = useRef<Array<{ resolve: (value: string) => void; reject: (error: any) => void }>>([]);
+
+  const processQueue = (error: any, token: string | null = null) => {
+    failedQueue.current.forEach(prom => {
+      if (error) {
+        prom.reject(error);
+      } else {
+        prom.resolve(token!);
+      }
+    });
+    failedQueue.current = [];
+  };
 
   const refreshToken = useCallback(async (): Promise<string | null> => {
     const refreshTokenValue = localStorage.getItem('refreshToken');
     
-    if (!refreshTokenValue) {
+    if (!refreshTokenValue || !refreshTokenValue.startsWith('prt_')) {
       return null;
     }
 
@@ -201,22 +283,26 @@ export const useApi = () => {
       });
 
       if (!response.ok) {
-        // Clear tokens and redirect to login
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
+        localStorage.removeItem('tokenExpiresAt');
         window.location.href = '/login';
         return null;
       }
 
       const { data } = await response.json();
+      
+      // IMPORTANT: Store the new rotated refresh token!
       localStorage.setItem('accessToken', data.token);
       localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem('tokenExpiresAt', data.expiresAt.toString());
       
       return data.token;
     } catch (err) {
       console.error('Token refresh failed:', err);
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
+      localStorage.removeItem('tokenExpiresAt');
       window.location.href = '/login';
       return null;
     }
@@ -241,12 +327,30 @@ export const useApi = () => {
         },
       });
 
-      // Handle token expiration
+      // Handle token expiration with queue for concurrent requests
       if (response.status === 401 && token) {
+        if (isRefreshing.current) {
+          return new Promise((resolve, reject) => {
+            failedQueue.current.push({ resolve, reject });
+          }).then(async (newToken) => {
+            const retryResponse = await fetch(`${API_URL}${endpoint}`, {
+              ...options,
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${newToken}`,
+                ...options.headers,
+              },
+            });
+            return retryResponse.json();
+          });
+        }
+
+        isRefreshing.current = true;
         const newToken = await refreshToken();
+        isRefreshing.current = false;
         
         if (newToken) {
-          // Retry with new token
+          processQueue(null, newToken);
           response = await fetch(`${API_URL}${endpoint}`, {
             ...options,
             headers: {
@@ -256,6 +360,7 @@ export const useApi = () => {
             },
           });
         } else {
+          processQueue(new Error('Refresh failed'), null);
           throw new Error('Authentication required');
         }
       }
@@ -295,6 +400,20 @@ const axiosInstance = axios.create({
   },
 });
 
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (value: string) => void; reject: (error: any) => void }> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token!);
+    }
+  });
+  failedQueue = [];
+};
+
 // Request interceptor - add token to requests
 axiosInstance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -317,42 +436,60 @@ axiosInstance.interceptors.response.use(
 
     // If 401 and haven't retried yet
     if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        }).then(token => {
+          if (originalRequest.headers) {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+          }
+          return axiosInstance(originalRequest);
+        }).catch(err => {
+          return Promise.reject(err);
+        });
+      }
+
       originalRequest._retry = true;
+      isRefreshing = true;
 
       const refreshToken = localStorage.getItem('refreshToken');
       
-      if (!refreshToken) {
-        // No refresh token, redirect to login
+      if (!refreshToken || !refreshToken.startsWith('prt_')) {
         localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('tokenExpiresAt');
         window.location.href = '/login';
         return Promise.reject(error);
       }
 
       try {
-        // Refresh the token
         const response = await axios.post(`${API_URL}/api/auth/refresh`, {
           refreshToken,
         });
 
-        const { token, refreshToken: newRefreshToken } = response.data.data;
+        const { token, refreshToken: newRefreshToken, expiresAt } = response.data.data;
         
-        // Update stored tokens
+        // IMPORTANT: Update both tokens - refresh token is rotated!
         localStorage.setItem('accessToken', token);
         localStorage.setItem('refreshToken', newRefreshToken);
+        localStorage.setItem('tokenExpiresAt', expiresAt.toString());
 
-        // Update the authorization header
+        processQueue(null, token);
+
         if (originalRequest.headers) {
           originalRequest.headers.Authorization = `Bearer ${token}`;
         }
 
-        // Retry the original request
         return axiosInstance(originalRequest);
       } catch (refreshError) {
-        // Refresh failed, clear tokens and redirect
+        processQueue(refreshError, null);
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
+        localStorage.removeItem('tokenExpiresAt');
         window.location.href = '/login';
         return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
       }
     }
 
@@ -363,67 +500,50 @@ axiosInstance.interceptors.response.use(
 export default axiosInstance;
 ```
 
-### 5. Usage Examples
-
-#### Using the API Client
+### 5. Logout Implementation
 
 ```typescript
-// Example: Fetch recommendations
-import { apiClient } from './apiClient';
-
-const fetchRecommendations = async () => {
+// Logout from current device
+const logout = async () => {
+  const refreshToken = localStorage.getItem('refreshToken');
+  
   try {
-    const data = await apiClient.get('/api/optimization/recommendations');
-    return data;
+    // Revoke the refresh token on server
+    await fetch(`${API_URL}/api/auth/logout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
   } catch (error) {
-    console.error('Failed to fetch recommendations:', error);
-    throw error;
+    console.error('Logout request failed:', error);
+  } finally {
+    // Always clear local storage
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('tokenExpiresAt');
+    window.location.href = '/login';
   }
 };
-```
 
-#### Using React Hook
-
-```typescript
-// Component example
-import { useApi } from './hooks/useApi';
-
-const RecommendationsComponent = () => {
-  const { apiCall, loading, error } = useApi();
-  const [recommendations, setRecommendations] = useState(null);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await apiCall('/api/optimization/recommendations');
-        setRecommendations(response.data);
-      } catch (err) {
-        console.error('Error:', err);
-      }
-    };
-    fetchData();
-  }, [apiCall]);
-
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div>Error: {error}</div>;
+// Logout from all devices (requires authentication)
+const logoutAllDevices = async () => {
+  const accessToken = localStorage.getItem('accessToken');
   
-  return <div>{/* Render recommendations */}</div>;
-};
-```
-
-#### Using Axios
-
-```typescript
-// Example: Fetch recommendations
-import axiosInstance from './api/axios';
-
-const fetchRecommendations = async () => {
   try {
-    const response = await axiosInstance.get('/api/optimization/recommendations');
-    return response.data;
+    await fetch(`${API_URL}/api/auth/logout-all`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    });
   } catch (error) {
-    console.error('Failed to fetch recommendations:', error);
-    throw error;
+    console.error('Logout all request failed:', error);
+  } finally {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('tokenExpiresAt');
+    window.location.href = '/login';
   }
 };
 ```
@@ -437,81 +557,18 @@ const fetchRecommendations = async () => {
 - **Memory**: Most secure but lost on refresh
 
 ### 2. Token Expiration
-- **Access Token**: Expires after ~1 hour
-- **Refresh Token**: Expires after ~7 days
-- Always check for 401 responses and refresh automatically
+- **Access Token**: Expires after 1 hour
+- **Custom Refresh Token**: Expires after 30 days
+- **Token Rotation**: Each refresh token can only be used once
+- Always use the new refresh token from the response!
 
-### 3. Concurrent Requests
-If multiple requests fail with 401 simultaneously, implement a queue to prevent multiple refresh attempts:
+### 3. Token Format
+- Access tokens are standard Supabase JWTs
+- Custom refresh tokens start with `prt_` prefix
+- Never use old refresh tokens - they are revoked after use
 
-```typescript
-let isRefreshing = false;
-let failedQueue: Array<{ resolve: (value: string) => void; reject: (error: any) => void }> = [];
-
-const processQueue = (error: any, token: string | null = null) => {
-  failedQueue.forEach(prom => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve(token!);
-    }
-  });
-  
-  failedQueue = [];
-};
-
-// In your interceptor/handler:
-if (error.response?.status === 401 && !isRefreshing) {
-  isRefreshing = true;
-  
-  return refreshToken()
-    .then(token => {
-      processQueue(null, token);
-      // Retry original request
-    })
-    .catch(err => {
-      processQueue(err, null);
-      return Promise.reject(err);
-    })
-    .finally(() => {
-      isRefreshing = false;
-    });
-} else if (isRefreshing) {
-  // Queue the request
-  return new Promise((resolve, reject) => {
-    failedQueue.push({ resolve, reject });
-  }).then(token => {
-    // Retry original request with new token
-  });
-}
-```
-
-### 4. Logout
-
-```typescript
-const logout = () => {
-  localStorage.removeItem('accessToken');
-  localStorage.removeItem('refreshToken');
-  // Optionally call logout endpoint
-  window.location.href = '/login';
-};
-```
-
-## Testing
-
-1. **Login** and verify tokens are stored
-2. **Make API calls** and verify Authorization header is included
-3. **Wait for token expiration** (or manually expire it) and verify automatic refresh
-4. **Test with expired refresh token** and verify redirect to login
-5. **Test concurrent requests** during token refresh
-
-## Error Handling
-
-Always handle these scenarios:
-- ✅ Token refresh succeeds → Continue with request
-- ✅ Token refresh fails → Clear tokens, redirect to login
-- ✅ No refresh token available → Redirect to login
-- ✅ Network errors during refresh → Show error message, allow retry
+### 4. Concurrent Requests
+The implementations above handle concurrent requests by queuing them during refresh.
 
 ## Security Best Practices
 
@@ -519,11 +576,38 @@ Always handle these scenarios:
 2. **Use HTTPS** in production
 3. **Implement CSRF protection** if using cookies
 4. **Clear tokens on logout** and browser close (optional)
-5. **Validate token expiration** before making requests (optional optimization)
+5. **Always use the new refresh token** - old ones are revoked
+6. **Validate token format** before using (check `prt_` prefix)
+
+## Testing
+
+1. **Login** and verify tokens are stored (access token and `prt_*` refresh token)
+2. **Make API calls** and verify Authorization header is included
+3. **Wait for access token expiration** (1 hour) or manually clear it
+4. **Verify automatic refresh** works and new tokens are stored
+5. **Test with expired refresh token** (30 days) and verify redirect to login
+6. **Test concurrent requests** during token refresh
+7. **Test logout** and verify refresh token is revoked
+
+## Database Setup
+
+Before using the refresh token system, create the `refresh_tokens` table in your Supabase database:
+
+```sql
+-- Run the SQL from: sqlTable/refresh_tokens.sql
+```
+
+## Error Handling
+
+Always handle these scenarios:
+- ✅ Token refresh succeeds → Continue with request, update both tokens
+- ✅ Token refresh fails → Clear tokens, redirect to login
+- ✅ No refresh token available → Redirect to login
+- ✅ Invalid refresh token format (no `prt_` prefix) → Redirect to login
+- ✅ Network errors during refresh → Show error message, allow retry
 
 ## Support
 
 For questions or issues, refer to:
 - Backend API documentation: `http://localhost:3000/api-docs`
 - Supabase Auth documentation: https://supabase.com/docs/guides/auth
-

@@ -51,6 +51,27 @@ export const authSchemas = {
       },
     },
   },
+  RefreshTokenRequest: {
+    type: 'object',
+    required: ['refreshToken'],
+    properties: {
+      refreshToken: {
+        type: 'string',
+        example: 'prt_abc123def456ghi789jkl012mno345pqr678stu901vwx234yz...',
+        description: 'Custom refresh token obtained from signin or signup response. Prefix "prt_" indicates pharmacy refresh token.',
+      },
+    },
+  },
+  LogoutRequest: {
+    type: 'object',
+    properties: {
+      refreshToken: {
+        type: 'string',
+        example: 'prt_abc123def456ghi789jkl012mno345pqr678stu901vwx234yz...',
+        description: 'Refresh token to revoke (optional - if not provided, only client-side logout)',
+      },
+    },
+  },
   AuthResponse: {
     type: 'object',
     properties: {
@@ -109,74 +130,38 @@ export const authSchemas = {
           token: {
             type: 'string',
             example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzA1MzI0MDAwfQ...',
-            description: 'Supabase access token (JWT) for authentication. Use this token in Authorization header as "Bearer {token}". This token expires after 1 hour.',
+            description: 'Access token (JWT) for authentication. Use this token in Authorization header as "Bearer {token}". This token expires after 1 hour.',
           },
           refreshToken: {
             type: 'string',
-            example: 'v1.abc123def456ghi789jkl012mno345pqr678stu901vwx234yz...',
-            description: 'Refresh token to obtain new access tokens when the current access token expires. Use this token with the /api/auth/refresh endpoint. Refresh tokens typically expire after 7 days.',
+            example: 'prt_abc123def456ghi789jkl012mno345pqr678stu901vwx234yz...',
+            description: 'Custom refresh token to obtain new access tokens. Valid for 30 days. Use with /api/auth/refresh endpoint. Token is rotated on each refresh for security.',
           },
-          session: {
-            type: 'object',
-            description: 'Supabase session object containing authentication details',
-            properties: {
-              access_token: {
-                type: 'string',
-                example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
-                description: 'Access token for API authentication',
-              },
-              refresh_token: {
-                type: 'string',
-                example: 'v1.abc123def456...',
-                description: 'Refresh token to obtain new access tokens',
-              },
-              expires_in: {
-                type: 'number',
-                example: 3600,
-                description: 'Token expiration time in seconds',
-              },
-              expires_at: {
-                type: 'number',
-                example: 1705324000,
-                description: 'Token expiration timestamp',
-              },
-              token_type: {
-                type: 'string',
-                example: 'bearer',
-                description: 'Token type (always "bearer" for Supabase)',
-              },
-              user: {
-                type: 'object',
-                description: 'Supabase Auth user object',
-                properties: {
-                  id: {
-                    type: 'string',
-                    format: 'uuid',
-                    example: '123e4567-e89b-12d3-a456-426614174000',
-                  },
-                  email: {
-                    type: 'string',
-                    format: 'email',
-                    example: 'pharmacy@example.com',
-                  },
-                  email_confirmed_at: {
-                    type: 'string',
-                    format: 'date-time',
-                    nullable: true,
-                    example: '2024-01-15T10:30:00Z',
-                  },
-                  created_at: {
-                    type: 'string',
-                    format: 'date-time',
-                    example: '2024-01-15T10:30:00Z',
-                  },
-                },
-              },
-            },
+          expiresIn: {
+            type: 'number',
+            example: 3600,
+            description: 'Access token expiration time in seconds (typically 1 hour)',
+          },
+          expiresAt: {
+            type: 'number',
+            example: 1705324000,
+            description: 'Access token expiration as Unix timestamp',
           },
         },
       },
     },
   },
+  LogoutResponse: {
+    type: 'object',
+    properties: {
+      status: {
+        type: 'string',
+        example: 'success',
+      },
+      message: {
+        type: 'string',
+        example: 'Logged out successfully',
+      },
+    },
+  },
 };
-

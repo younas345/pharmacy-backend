@@ -17,7 +17,45 @@ export const getOptimizationRecommendationsHandler = catchAsync(
       ? ndcParam.split(',').map(n => n.trim()).filter(n => n.length > 0)
       : undefined;
 
-    const recommendations = await getOptimizationRecommendations(pharmacyId, ndcs);
+    // Get FullCount and PartialCount query parameters (comma-separated, matching NDC order)
+    const fullCountParam = req.query.FullCount as string | undefined;
+    const partialCountParam = req.query.PartialCount as string | undefined;
+
+    // Parse comma-separated values
+    const fullCounts = fullCountParam 
+      ? fullCountParam.split(',').map(v => v.trim()).filter(v => v.length > 0).map(v => Number(v))
+      : undefined;
+    const partialCounts = partialCountParam 
+      ? partialCountParam.split(',').map(v => v.trim()).filter(v => v.length > 0).map(v => Number(v))
+      : undefined;
+
+    // Validate: if ndc is provided, at least one of FullCount or PartialCount must be provided
+    if (ndcs && ndcs.length > 0) {
+      if ((!fullCounts || fullCounts.length === 0) && (!partialCounts || partialCounts.length === 0)) {
+        throw new AppError('When ndc is provided, at least one of FullCount or PartialCount must be provided (comma-separated, matching NDC order)', 400);
+      }
+
+      // Validate that the count arrays match the NDC array length
+      if (fullCounts && fullCounts.length !== ndcs.length) {
+        throw new AppError(`FullCount array length (${fullCounts.length}) must match NDC array length (${ndcs.length})`, 400);
+      }
+
+      if (partialCounts && partialCounts.length !== ndcs.length) {
+        throw new AppError(`PartialCount array length (${partialCounts.length}) must match NDC array length (${ndcs.length})`, 400);
+      }
+
+      // Validate that for each NDC, at least one of full or partial is specified
+      for (let i = 0; i < ndcs.length; i++) {
+        const hasFull = fullCounts && fullCounts[i] !== undefined && fullCounts[i] !== null;
+        const hasPartial = partialCounts && partialCounts[i] !== undefined && partialCounts[i] !== null;
+        
+        if (!hasFull && !hasPartial) {
+          throw new AppError(`For NDC ${ndcs[i]}, at least one of FullCount or PartialCount must be provided at position ${i + 1}`, 400);
+        }
+      }
+    }
+
+    const recommendations = await getOptimizationRecommendations(pharmacyId, ndcs, fullCounts, partialCounts);
 
     res.status(200).json({
       status: 'success',

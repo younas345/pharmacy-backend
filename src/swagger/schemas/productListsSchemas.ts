@@ -15,9 +15,17 @@ export const productListsSchemas = {
         type: 'string',
         example: 'Product 23433-3232-34',
       },
-      quantity: {
-        type: 'number',
-        example: 13,
+      full_units: {
+        type: 'integer',
+        minimum: 0,
+        example: 10,
+        description: 'Number of full units. Must be 0 if partial_units > 0, or > 0 if partial_units = 0',
+      },
+      partial_units: {
+        type: 'integer',
+        minimum: 0,
+        example: 0,
+        description: 'Number of partial units. Must be 0 if full_units > 0, or > 0 if full_units = 0',
       },
       lot_number: {
         type: 'string',
@@ -50,7 +58,7 @@ export const productListsSchemas = {
   },
   AddProductListItemRequest: {
     type: 'object',
-    required: ['ndc', 'product_name', 'quantity'],
+    required: ['ndc', 'product_name', 'full_units', 'partial_units'],
     properties: {
       ndc: {
         type: 'string',
@@ -60,9 +68,17 @@ export const productListsSchemas = {
         type: 'string',
         example: 'Product 23433-3232-34',
       },
-      quantity: {
-        type: 'number',
-        example: 13,
+      full_units: {
+        type: 'integer',
+        minimum: 0,
+        example: 10,
+        description: 'Number of full units. Must be 0 if partial_units > 0, or > 0 if partial_units = 0',
+      },
+      partial_units: {
+        type: 'integer',
+        minimum: 0,
+        example: 0,
+        description: 'Number of partial units. Must be 0 if full_units > 0, or > 0 if full_units = 0',
       },
       lot_number: {
         type: 'string',
@@ -84,7 +100,7 @@ export const productListsSchemas = {
   },
   UpdateProductListItemRequest: {
     type: 'object',
-    description: 'At least one field must be provided for update',
+    description: 'At least one field must be provided for update. When updating full_units or partial_units, one must be 0 and the other must be > 0',
     properties: {
       ndc: {
         type: 'string',
@@ -94,9 +110,17 @@ export const productListsSchemas = {
         type: 'string',
         example: 'Product 23433-3232-34',
       },
-      quantity: {
-        type: 'number',
-        example: 13,
+      full_units: {
+        type: 'integer',
+        minimum: 0,
+        example: 10,
+        description: 'Number of full units. Must be 0 if partial_units > 0, or > 0 if partial_units = 0',
+      },
+      partial_units: {
+        type: 'integer',
+        minimum: 0,
+        example: 0,
+        description: 'Number of partial units. Must be 0 if full_units > 0, or > 0 if full_units = 0',
       },
       lot_number: {
         type: 'string',
