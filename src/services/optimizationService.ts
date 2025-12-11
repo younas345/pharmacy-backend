@@ -1876,6 +1876,25 @@ export const getPackageRecommendations = async (
 
   // Map to track latest price per distributor-NDC combination
   const distributorNdcToLatestPriceMap: Record<string, number> = {};
+  // Maps to track FULL and PARTIAL prices separately per distributor-NDC combination
+  const distributorNdcToFullPriceMap: Record<string, number> = {};
+  const distributorNdcToPartialPriceMap: Record<string, number> = {};
+  
+  // Build unit type map for each NDC based on pharmacy's inventory
+  // Key: normalized NDC, Value: { needsFullPrice: boolean, needsPartialPrice: boolean }
+  const ndcUnitTypeMap: Map<string, { needsFullPrice: boolean; needsPartialPrice: boolean }> = new Map();
+  productItems.forEach((item: any) => {
+    const normalizedNdc = String(item.ndc).replace(/-/g, '').trim();
+    const fullUnits = item.full_units || 0;
+    const partialUnits = item.partial_units || 0;
+    
+    // If partial_units = 0, then it's a full unit item (match full > 0 records)
+    const needsFullPrice = partialUnits === 0 && fullUnits > 0;
+    // If full_units = 0, then it's a partial unit item (match partial > 0 records)
+    const needsPartialPrice = fullUnits === 0 && partialUnits > 0;
+    
+    ndcUnitTypeMap.set(normalizedNdc, { needsFullPrice, needsPartialPrice });
+  });
 
   // Initialize map for all NDCs
   ndcs.forEach((ndc) => {
@@ -1931,6 +1950,34 @@ export const getPackageRecommendations = async (
         return;
       }
 
+      // Get full and partial values from return report item
+      const itemFull = Number(item.full) || 0;
+      const itemPartial = Number(item.partial) || 0;
+      
+      // Check unit type requirement for this NDC based on pharmacy's inventory
+      const normalizedMatchingNdc = String(matchingNdc).replace(/-/g, '').trim();
+      const unitTypeReq = ndcUnitTypeMap.get(normalizedMatchingNdc);
+      
+      // Filter records based on pharmacy's inventory unit type
+      // This ensures we only use prices for the correct unit type (matching /recommendations behavior)
+      if (unitTypeReq) {
+        const { needsFullPrice, needsPartialPrice } = unitTypeReq;
+        
+        // If pharmacy needs full price, skip records where full = 0 or partial > 0
+        if (needsFullPrice) {
+          if (itemFull === 0 || itemPartial > 0) {
+            return; // Skip this record - not a full unit record
+          }
+        }
+        
+        // If pharmacy needs partial price, skip records where partial = 0 or full > 0
+        if (needsPartialPrice) {
+          if (itemPartial === 0 || itemFull > 0) {
+            return; // Skip this record - not a partial unit record
+          }
+        }
+      }
+
       const quantity = Number(item.quantity) || 1;
       const creditAmount = Number(item.creditAmount) || 0;
       const pricePerUnit =
@@ -1942,6 +1989,20 @@ export const getPackageRecommendations = async (
         const distributorNdcKey = `${distributorName}|${matchingNdc}`;
         if (!distributorNdcToLatestPriceMap[distributorNdcKey]) {
           distributorNdcToLatestPriceMap[distributorNdcKey] = pricePerUnit;
+        }
+        
+        // Track FULL and PARTIAL prices separately
+        // A record is for FULL if full > 0 and partial = 0
+        // A record is for PARTIAL if partial > 0 and full = 0
+        const isFullRecord = itemFull > 0 && itemPartial === 0;
+        const isPartialRecord = itemPartial > 0 && itemFull === 0;
+        
+        if (isFullRecord && !distributorNdcToFullPriceMap[distributorNdcKey]) {
+          distributorNdcToFullPriceMap[distributorNdcKey] = pricePerUnit;
+        }
+        
+        if (isPartialRecord && !distributorNdcToPartialPriceMap[distributorNdcKey]) {
+          distributorNdcToPartialPriceMap[distributorNdcKey] = pricePerUnit;
         }
         
         ndcPricingMap[matchingNdc].push({
@@ -1990,8 +2051,9 @@ export const getPackageRecommendations = async (
       distributorPrices[distName].count += 1;
     });
 
-    // Use latest price per distributor (not average)
-    // Since we sorted by report_date desc, the latest prices are stored in distributorNdcToLatestPriceMap
+    // Since we already filtered records by unit type during processing,
+    // distributorNdcToLatestPriceMap contains only prices from matching unit type records
+    // This matches the behavior of /recommendations API
     const distributorAverages: Array<{ name: string; price: number }> = Object.entries(
       distributorPrices
     )
@@ -1999,11 +2061,14 @@ export const getPackageRecommendations = async (
       .map(([name, data]) => {
         const distributorName = name.trim();
         const distributorNdcKey = `${distributorName}|${ndc}`;
-        // Use latest price if available, otherwise fallback to average
+        
+        // Use latest price directly - already filtered by unit type
         const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
+        const price = latestPrice !== undefined ? latestPrice : data.totalPrice / data.count;
+        
         return {
           name: distributorName,
-          price: latestPrice !== undefined ? latestPrice : data.totalPrice / data.count,
+          price,
         };
       });
 
@@ -2362,6 +2427,9 @@ export const getPackageRecommendationsByNdcs = async (
 
   // Map to track latest price per distributor-NDC combination
   const distributorNdcToLatestPriceMap: Record<string, number> = {};
+  // Maps to track FULL and PARTIAL prices separately per distributor-NDC combination
+  const distributorNdcToFullPriceMap: Record<string, number> = {};
+  const distributorNdcToPartialPriceMap: Record<string, number> = {};
 
   // Step 4: Build pricing map (NDC -> Distributor -> Best Price)
   const ndcPricingMap: Record<
@@ -2428,6 +2496,10 @@ export const getPackageRecommendationsByNdcs = async (
         return;
       }
 
+      // Get full and partial values from return report item
+      const itemFull = Number(item.full) || 0;
+      const itemPartial = Number(item.partial) || 0;
+
       const quantity = Number(item.quantity) || 1;
       const creditAmount = Number(item.creditAmount) || 0;
       const pricePerUnit =
@@ -2439,6 +2511,20 @@ export const getPackageRecommendationsByNdcs = async (
         const distributorNdcKey = `${distributorName}|${matchingNdc}`;
         if (!distributorNdcToLatestPriceMap[distributorNdcKey]) {
           distributorNdcToLatestPriceMap[distributorNdcKey] = pricePerUnit;
+        }
+        
+        // Track FULL and PARTIAL prices separately
+        // A record is for FULL if full > 0 and partial = 0
+        // A record is for PARTIAL if partial > 0 and full = 0
+        const isFullRecord = itemFull > 0 && itemPartial === 0;
+        const isPartialRecord = itemPartial > 0 && itemFull === 0;
+        
+        if (isFullRecord && !distributorNdcToFullPriceMap[distributorNdcKey]) {
+          distributorNdcToFullPriceMap[distributorNdcKey] = pricePerUnit;
+        }
+        
+        if (isPartialRecord && !distributorNdcToPartialPriceMap[distributorNdcKey]) {
+          distributorNdcToPartialPriceMap[distributorNdcKey] = pricePerUnit;
         }
         
         ndcPricingMap[matchingNdc].push({
@@ -2486,8 +2572,8 @@ export const getPackageRecommendationsByNdcs = async (
       distributorPrices[distName].count += 1;
     });
 
-    // Use latest price per distributor (not average)
-    // Since we sorted by report_date desc, the latest prices are stored in distributorNdcToLatestPriceMap
+    // Use latest FULL price per distributor (not average or mixed price)
+    // This ensures consistency - use full price if available, otherwise partial, then fallback
     const distributorAverages: Array<{ name: string; price: number }> = Object.entries(
       distributorPrices
     )
@@ -2495,11 +2581,26 @@ export const getPackageRecommendationsByNdcs = async (
       .map(([name, data]) => {
         const distributorName = name.trim();
         const distributorNdcKey = `${distributorName}|${ndc}`;
-        // Use latest price if available, otherwise fallback to average
+        
+        // Priority: Use full price > partial price > latest price > average
+        const fullPrice = distributorNdcToFullPriceMap[distributorNdcKey];
+        const partialPrice = distributorNdcToPartialPriceMap[distributorNdcKey];
         const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
+        
+        let price: number;
+        if (fullPrice !== undefined && fullPrice > 0) {
+          price = fullPrice;
+        } else if (partialPrice !== undefined && partialPrice > 0) {
+          price = partialPrice;
+        } else if (latestPrice !== undefined) {
+          price = latestPrice;
+        } else {
+          price = data.totalPrice / data.count;
+        }
+        
         return {
           name: distributorName,
-          price: latestPrice !== undefined ? latestPrice : data.totalPrice / data.count,
+          price,
         };
       });
 
