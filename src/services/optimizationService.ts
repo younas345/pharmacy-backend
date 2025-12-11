@@ -101,14 +101,40 @@ export const getOptimizationRecommendations = async (
     console.log(`📋 Search mode: Skipping pharmacy inventory, will use return_reports data only`);
   } else {
     // Step 1: Get all product list items for this pharmacy (including full_units and partial_units)
-    const { data: items, error: itemsError } = await db
-      .from('product_list_items')
-      .select('id, ndc, product_name, full_units, partial_units, lot_number, expiration_date')
-      .eq('added_by', pharmacyId);
+    // Use pagination to fetch ALL records (Supabase default limit is 1000)
+    console.log(`📦 Fetching ALL product_list_items for pharmacy ${pharmacyId} using pagination...`);
+    const allItems: any[] = [];
+    const itemsBatchSize = 1000;
+    let itemsOffset = 0;
+    let hasMoreItems = true;
 
-    if (itemsError) {
-      throw new AppError(`Failed to fetch product list items: ${itemsError.message}`, 400);
+    while (hasMoreItems) {
+      const { data: itemsBatch, error: itemsError } = await db
+        .from('product_list_items')
+        .select('id, ndc, product_name, full_units, partial_units, lot_number, expiration_date')
+        .eq('added_by', pharmacyId)
+        .range(itemsOffset, itemsOffset + itemsBatchSize - 1);
+
+      if (itemsError) {
+        throw new AppError(`Failed to fetch product list items: ${itemsError.message}`, 400);
+      }
+
+      if (itemsBatch && itemsBatch.length > 0) {
+        allItems.push(...itemsBatch);
+        itemsOffset += itemsBatchSize;
+        console.log(`   ✅ Fetched ${allItems.length} product_list_items so far...`);
+        
+        // If we got fewer records than batch size, we've reached the end
+        if (itemsBatch.length < itemsBatchSize) {
+          hasMoreItems = false;
+        }
+      } else {
+        hasMoreItems = false;
+      }
     }
+
+    console.log(`📦 Total product_list_items fetched: ${allItems.length}`);
+    const items = allItems;
 
     if (!items || items.length === 0) {
       // Get total active distributors for empty response
@@ -175,24 +201,23 @@ export const getOptimizationRecommendations = async (
 
   // Step 3: Search return_reports for matching NDCs
   // Join with uploaded_documents and reverse_distributors to get distributor name
-  const baseQuery = db
-    .from('return_reports')
-    .select(`
-      id,
-      data,
-      document_id,
-      created_at,
-      pharmacy_id,
-      uploaded_documents (
-        reverse_distributor_id,
-        report_date,
-        uploaded_at,
-        reverse_distributors (
-          id,
-          name
-        )
+  // Note: We create a fresh query for each batch to avoid query reuse issues
+  const selectFields = `
+    id,
+    data,
+    document_id,
+    created_at,
+    pharmacy_id,
+    uploaded_documents (
+      reverse_distributor_id,
+      report_date,
+      uploaded_at,
+      reverse_distributors (
+        id,
+        name
       )
-    `);
+    )
+  `;
 
   // IMPORTANT: Do NOT filter return_reports by pharmacy_id for pricing data
   // We want to show prices from ALL distributors across ALL return reports
@@ -254,6 +279,7 @@ export const getOptimizationRecommendations = async (
 
   // Fetch ALL records using pagination (Supabase default limit is 1000)
   // Fetch in batches of 1000 until we get all records
+  // IMPORTANT: Create a fresh query for each batch to avoid query builder reuse issues
   console.log(`📊 Fetching ALL return_reports using pagination...`);
   const returnReports: any[] = [];
   const batchSize = 1000;
@@ -261,8 +287,13 @@ export const getOptimizationRecommendations = async (
   let hasMore = true;
 
   while (hasMore) {
-    // Build query for this batch, applying filters if any
-    let batchQuery = baseQuery.range(offset, offset + batchSize - 1);
+    // Create a FRESH query for each batch (Supabase query builders can have state issues when reused)
+    let batchQuery = db
+      .from('return_reports')
+      .select(selectFields)
+      .range(offset, offset + batchSize - 1);
+    
+    // Apply OR conditions if any (for search mode)
     if (orConditions.length > 0) {
       batchQuery = batchQuery.or(orConditions.join(','));
     }
@@ -1009,7 +1040,7 @@ export const getOptimizationRecommendations = async (
 
     // Calculate price per distributor
     // Always use latest price based on report_date (not average)
-    const distributorAverages: Array<{ name: string; price: number }> = Object.entries(
+    const distributorAverages: Array<{ name: string; price: number; fullPrice?: number; partialPrice?: number }> = Object.entries(
       distributorPrices
     )
       .filter(([_, data]) => data.count > 0) // Ensure we have valid data
@@ -1017,25 +1048,42 @@ export const getOptimizationRecommendations = async (
         const distributorName = name.trim();
         let price: number;
         
-        // Always use latest price per distributor-NDC combination
         const distributorNdcKey = `${distributorName}|${ndc}`;
-        const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
         
-        if (latestPrice !== undefined) {
-          price = latestPrice;
-          if (isSearchMode) {
-            console.log(`   💰 Using latest price for ${distributorName}|${ndc}: ${price}`);
-          }
-        } else {
-          // Fallback to average if latest not found (shouldn't happen, but safety fallback)
-          price = data.totalPrice / data.count;
-          console.log(`   ⚠️ Latest price not found for ${distributorName}|${ndc}, using average: ${price}`);
-          console.log(`   🔍 Available keys in latestPriceMap:`, Object.keys(distributorNdcToLatestPriceMap).filter(k => k.includes(distributorName) || k.includes(ndc)));
-        }
-        
-        // In search mode, also get full and partial prices for this distributor-NDC
+        // In search mode, get full and partial prices separately
         const fullPrice = isSearchMode ? (distributorNdcToFullPriceMap[distributorNdcKey] || 0) : undefined;
         const partialPrice = isSearchMode ? (distributorNdcToPartialPriceMap[distributorNdcKey] || 0) : undefined;
+        
+        if (isSearchMode) {
+          // In search mode, use the FULL price as the main price if available
+          // This ensures consistency with non-search mode which filters by unit type
+          // If no full price, use partial price; if neither, fall back to latest price
+          if (fullPrice && fullPrice > 0) {
+            price = fullPrice;
+            console.log(`   💰 Using FULL price for ${distributorName}|${ndc}: ${price}`);
+          } else if (partialPrice && partialPrice > 0) {
+            price = partialPrice;
+            console.log(`   💰 Using PARTIAL price for ${distributorName}|${ndc}: ${price} (no full price available)`);
+          } else {
+            // Fallback to latest price map (shouldn't happen in practice)
+            const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
+            price = latestPrice !== undefined ? latestPrice : data.totalPrice / data.count;
+            console.log(`   ⚠️ No full/partial price found, using fallback for ${distributorName}|${ndc}: ${price}`);
+          }
+        } else {
+          // Non-search mode: use latest price per distributor-NDC combination
+          // (already filtered by unit type during data collection)
+          const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
+          
+          if (latestPrice !== undefined) {
+            price = latestPrice;
+          } else {
+            // Fallback to average if latest not found (shouldn't happen, but safety fallback)
+            price = data.totalPrice / data.count;
+            console.log(`   ⚠️ Latest price not found for ${distributorName}|${ndc}, using average: ${price}`);
+            console.log(`   🔍 Available keys in latestPriceMap:`, Object.keys(distributorNdcToLatestPriceMap).filter(k => k.includes(distributorName) || k.includes(ndc)));
+          }
+        }
         
         if (isSearchMode) {
           console.log(`   💰 ${distributorName}|${ndc}: price=${price}, fullPrice=${fullPrice}, partialPrice=${partialPrice}`);
@@ -1691,14 +1739,39 @@ export const getPackageRecommendations = async (
   const db = supabaseAdmin;
 
   // Step 1: Get all product list items for this pharmacy
-  const { data: productItems, error: itemsError } = await db
-    .from('product_list_items')
-    .select('id, ndc, product_name, full_units, partial_units')
-    .eq('added_by', pharmacyId);
+  // Use pagination to fetch ALL records (Supabase default limit is 1000)
+  console.log(`📦 getPackageRecommendations: Fetching ALL product_list_items for pharmacy ${pharmacyId} using pagination...`);
+  const allProductItems: any[] = [];
+  const productBatchSize = 1000;
+  let productOffset = 0;
+  let hasMoreProducts = true;
 
-  if (itemsError) {
-    throw new AppError(`Failed to fetch product list items: ${itemsError.message}`, 400);
+  while (hasMoreProducts) {
+    const { data: productBatch, error: itemsError } = await db
+      .from('product_list_items')
+      .select('id, ndc, product_name, full_units, partial_units')
+      .eq('added_by', pharmacyId)
+      .range(productOffset, productOffset + productBatchSize - 1);
+
+    if (itemsError) {
+      throw new AppError(`Failed to fetch product list items: ${itemsError.message}`, 400);
+    }
+
+    if (productBatch && productBatch.length > 0) {
+      allProductItems.push(...productBatch);
+      productOffset += productBatchSize;
+      console.log(`   ✅ Fetched ${allProductItems.length} product_list_items so far...`);
+      
+      if (productBatch.length < productBatchSize) {
+        hasMoreProducts = false;
+      }
+    } else {
+      hasMoreProducts = false;
+    }
   }
+
+  console.log(`📦 Total product_list_items fetched: ${allProductItems.length}`);
+  const productItems = allProductItems;
 
   if (!productItems || productItems.length === 0) {
     return {
@@ -1722,25 +1795,26 @@ export const getPackageRecommendations = async (
   // Join with uploaded_documents and reverse_distributors to get distributor name
   // IMPORTANT: Do NOT filter by pharmacy_id - we want ALL distributor prices
   // to find the best prices across all distributors
-  const baseQuery = db
-    .from('return_reports')
-    .select(`
-      id,
-      data,
-      document_id,
-      uploaded_documents (
-        reverse_distributor_id,
-        reverse_distributors (
-          id,
-          name
-        )
+  const selectFields = `
+    id,
+    data,
+    document_id,
+    created_at,
+    uploaded_documents (
+      reverse_distributor_id,
+      report_date,
+      uploaded_at,
+      reverse_distributors (
+        id,
+        name
       )
-    `);
+    )
+  `;
 
   console.log(`🏥 getPackageRecommendations: Fetching return_reports from ALL distributors (no pharmacy_id filter)`);
 
   // Fetch ALL records using pagination (Supabase default limit is 1000)
-  // Fetch in batches of 1000 until we get all records
+  // IMPORTANT: Create a fresh query for each batch to avoid query builder reuse issues
   console.log(`📊 Fetching ALL return_reports using pagination...`);
   const returnReports: any[] = [];
   const batchSize = 1000;
@@ -1748,7 +1822,12 @@ export const getPackageRecommendations = async (
   let hasMore = true;
 
   while (hasMore) {
-    const batchQuery = baseQuery.range(offset, offset + batchSize - 1);
+    // Create a FRESH query for each batch
+    const batchQuery = db
+      .from('return_reports')
+      .select(selectFields)
+      .range(offset, offset + batchSize - 1);
+    
     const { data: batch, error: batchError } = await batchQuery;
 
     if (batchError) {
@@ -1771,6 +1850,19 @@ export const getPackageRecommendations = async (
 
   console.log(`📊 Total return_reports fetched: ${returnReports.length}`);
 
+  // Sort by report_date (latest first) for determining latest prices
+  // Priority: report_date > uploaded_at > created_at
+  if (returnReports && returnReports.length > 0) {
+    returnReports.sort((a: any, b: any) => {
+      const dateA = a.uploaded_documents?.report_date || a.uploaded_documents?.uploaded_at || a.created_at;
+      const dateB = b.uploaded_documents?.report_date || b.uploaded_documents?.uploaded_at || b.created_at;
+      const dateAObj = dateA ? new Date(dateA) : new Date(0);
+      const dateBObj = dateB ? new Date(dateB) : new Date(0);
+      return dateBObj.getTime() - dateAObj.getTime();
+    });
+    console.log(`📅 Sorted ${returnReports.length} return reports by report_date (latest first)`);
+  }
+
   // Step 4: Build pricing map (NDC -> Distributor -> Best Price)
   const ndcPricingMap: Record<
     string,
@@ -1782,6 +1874,9 @@ export const getPackageRecommendations = async (
     }>
   > = {};
 
+  // Map to track latest price per distributor-NDC combination
+  const distributorNdcToLatestPriceMap: Record<string, number> = {};
+
   // Initialize map for all NDCs
   ndcs.forEach((ndc) => {
     ndcPricingMap[ndc] = [];
@@ -1791,10 +1886,10 @@ export const getPackageRecommendations = async (
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
     // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
-    const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
+    const distributorName = (report.uploaded_documents?.reverse_distributors?.name || 
                            data?.reverseDistributor || 
                            data?.reverseDistributorInfo?.name ||
-                           'Unknown Distributor';
+                           'Unknown Distributor').trim();
 
     if (!distributorName || distributorName === 'Unknown Distributor') {
       return;
@@ -1842,6 +1937,13 @@ export const getPackageRecommendations = async (
         Number(item.pricePerUnit) || (quantity > 0 && creditAmount > 0 ? creditAmount / quantity : 0);
 
       if (pricePerUnit > 0) {
+        // Track latest price per distributor-NDC combination
+        // Since we sorted by report_date desc, the first matching record is the latest
+        const distributorNdcKey = `${distributorName}|${matchingNdc}`;
+        if (!distributorNdcToLatestPriceMap[distributorNdcKey]) {
+          distributorNdcToLatestPriceMap[distributorNdcKey] = pricePerUnit;
+        }
+        
         ndcPricingMap[matchingNdc].push({
           distributorName,
           pricePerUnit,
@@ -1870,7 +1972,7 @@ export const getPackageRecommendations = async (
       return;
     }
 
-    // Group by distributor and get average price per unit
+    // Group by distributor and use latest price per distributor-NDC
     const distributorPrices: Record<
       string,
       { totalPrice: number; count: number }
@@ -1888,15 +1990,22 @@ export const getPackageRecommendations = async (
       distributorPrices[distName].count += 1;
     });
 
-    // Calculate average price per distributor
+    // Use latest price per distributor (not average)
+    // Since we sorted by report_date desc, the latest prices are stored in distributorNdcToLatestPriceMap
     const distributorAverages: Array<{ name: string; price: number }> = Object.entries(
       distributorPrices
     )
       .filter(([_, data]) => data.count > 0)
-      .map(([name, data]) => ({
-        name: name.trim(),
-        price: data.totalPrice / data.count, // Average price per unit
-      }));
+      .map(([name, data]) => {
+        const distributorName = name.trim();
+        const distributorNdcKey = `${distributorName}|${ndc}`;
+        // Use latest price if available, otherwise fallback to average
+        const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
+        return {
+          name: distributorName,
+          price: latestPrice !== undefined ? latestPrice : data.totalPrice / data.count,
+        };
+      });
 
     if (distributorAverages.length === 0) {
       return;
@@ -2184,31 +2293,38 @@ export const getPackageRecommendationsByNdcs = async (
 
   // Step 3: Get pricing data from return_reports
   // Join with uploaded_documents and reverse_distributors to get distributor name
-  const baseQuery = db
-    .from('return_reports')
-    .select(`
-      id,
-      data,
-      document_id,
-      uploaded_documents (
-        reverse_distributor_id,
-        reverse_distributors (
-          id,
-          name
-        )
+  // IMPORTANT: Create a fresh query for each batch to avoid query builder reuse issues
+  const selectFields = `
+    id,
+    data,
+    document_id,
+    created_at,
+    uploaded_documents (
+      reverse_distributor_id,
+      report_date,
+      uploaded_at,
+      reverse_distributors (
+        id,
+        name
       )
-    `);
+    )
+  `;
 
   // Fetch ALL records using pagination (Supabase default limit is 1000)
   // Fetch in batches of 1000 until we get all records
-  console.log(`📊 Fetching ALL return_reports using pagination...`);
+  console.log(`📊 getPackageRecommendationsByNdcs: Fetching ALL return_reports using pagination...`);
   const returnReports: any[] = [];
   const batchSize = 1000;
   let offset = 0;
   let hasMore = true;
 
   while (hasMore) {
-    const batchQuery = baseQuery.range(offset, offset + batchSize - 1);
+    // Create a FRESH query for each batch
+    const batchQuery = db
+      .from('return_reports')
+      .select(selectFields)
+      .range(offset, offset + batchSize - 1);
+    
     const { data: batch, error: batchError } = await batchQuery;
 
     if (batchError) {
@@ -2231,6 +2347,22 @@ export const getPackageRecommendationsByNdcs = async (
 
   console.log(`📊 Total return_reports fetched: ${returnReports.length}`);
 
+  // Sort by report_date (latest first) for determining latest prices
+  // Priority: report_date > uploaded_at > created_at
+  if (returnReports && returnReports.length > 0) {
+    returnReports.sort((a: any, b: any) => {
+      const dateA = a.uploaded_documents?.report_date || a.uploaded_documents?.uploaded_at || a.created_at;
+      const dateB = b.uploaded_documents?.report_date || b.uploaded_documents?.uploaded_at || b.created_at;
+      const dateAObj = dateA ? new Date(dateA) : new Date(0);
+      const dateBObj = dateB ? new Date(dateB) : new Date(0);
+      return dateBObj.getTime() - dateAObj.getTime();
+    });
+    console.log(`📅 Sorted ${returnReports.length} return reports by report_date (latest first)`);
+  }
+
+  // Map to track latest price per distributor-NDC combination
+  const distributorNdcToLatestPriceMap: Record<string, number> = {};
+
   // Step 4: Build pricing map (NDC -> Distributor -> Best Price)
   const ndcPricingMap: Record<
     string,
@@ -2251,10 +2383,10 @@ export const getPackageRecommendationsByNdcs = async (
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
     // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
-    const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
+    const distributorName = (report.uploaded_documents?.reverse_distributors?.name || 
                            data?.reverseDistributor || 
                            data?.reverseDistributorInfo?.name ||
-                           'Unknown Distributor';
+                           'Unknown Distributor').trim();
 
     if (!distributorName || distributorName === 'Unknown Distributor') {
       return;
@@ -2302,6 +2434,13 @@ export const getPackageRecommendationsByNdcs = async (
         Number(item.pricePerUnit) || (quantity > 0 && creditAmount > 0 ? creditAmount / quantity : 0);
 
       if (pricePerUnit > 0) {
+        // Track latest price per distributor-NDC combination
+        // Since we sorted by report_date desc, the first matching record is the latest
+        const distributorNdcKey = `${distributorName}|${matchingNdc}`;
+        if (!distributorNdcToLatestPriceMap[distributorNdcKey]) {
+          distributorNdcToLatestPriceMap[distributorNdcKey] = pricePerUnit;
+        }
+        
         ndcPricingMap[matchingNdc].push({
           distributorName,
           pricePerUnit,
@@ -2329,7 +2468,7 @@ export const getPackageRecommendationsByNdcs = async (
       return;
     }
 
-    // Group by distributor and get average price per unit
+    // Group by distributor and use latest price per distributor-NDC
     const distributorPrices: Record<
       string,
       { totalPrice: number; count: number }
@@ -2347,15 +2486,22 @@ export const getPackageRecommendationsByNdcs = async (
       distributorPrices[distName].count += 1;
     });
 
-    // Calculate average price per distributor
+    // Use latest price per distributor (not average)
+    // Since we sorted by report_date desc, the latest prices are stored in distributorNdcToLatestPriceMap
     const distributorAverages: Array<{ name: string; price: number }> = Object.entries(
       distributorPrices
     )
       .filter(([_, data]) => data.count > 0)
-      .map(([name, data]) => ({
-        name: name.trim(),
-        price: data.totalPrice / data.count, // Average price per unit
-      }));
+      .map(([name, data]) => {
+        const distributorName = name.trim();
+        const distributorNdcKey = `${distributorName}|${ndc}`;
+        // Use latest price if available, otherwise fallback to average
+        const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
+        return {
+          name: distributorName,
+          price: latestPrice !== undefined ? latestPrice : data.totalPrice / data.count,
+        };
+      });
 
     if (distributorAverages.length === 0) {
       return;
