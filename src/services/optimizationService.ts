@@ -3468,84 +3468,109 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     ndcProductNames[normalizedNdc] = productName;
   }
 
-  // Step 6: Find distributors that support ALL NDCs
-  // First, get the set of distributors for each NDC
-  const distributorsByNdc: Record<string, Set<string>> = {};
+  // Step 6: Fetch ALL distributors from database (not just those with matching records)
+  const { data: allDistributorsFromDb, error: allDistError } = await db
+    .from('reverse_distributors')
+    .select('id, name, contact_email, contact_phone, address');
+
+  if (allDistError) {
+    console.warn(`⚠️ Failed to fetch all distributors: ${allDistError.message}`);
+  }
+
+  const allDistributorsList = allDistributorsFromDb || [];
+  console.log(`📋 Total distributors in database: ${allDistributorsList.length}`);
+
+  // Build a map for quick lookup of distributor pricing by name
+  const distributorPricingByName: Record<string, Record<string, { fullPricePerUnit: number | null; partialPricePerUnit: number | null }>> = {};
+  
+  // Initialize pricing lookup from ndcDistributorPricing
   items.forEach((item) => {
     const normalizedNdc = item.ndc.trim();
     const distributorPrices = ndcDistributorPricing[normalizedNdc] || [];
-    distributorsByNdc[normalizedNdc] = new Set(
-      distributorPrices.map((dist) => dist.distributorName.trim())
-    );
-  });
-
-  // Find distributors that appear in ALL NDC sets (support all NDCs)
-  const allDistributorNames = new Set<string>();
-  Object.values(distributorsByNdc).forEach((distSet) => {
-    distSet.forEach((distName) => allDistributorNames.add(distName));
-  });
-
-  const distributorsWithAllNdcs = new Set<string>();
-  allDistributorNames.forEach((distName) => {
-    // Check if this distributor appears in ALL NDC sets
-    const supportsAllNdcs = items.every((item) => {
-      const normalizedNdc = item.ndc.trim();
-      return distributorsByNdc[normalizedNdc]?.has(distName) || false;
+    
+    distributorPrices.forEach((dist) => {
+      const distributorName = dist.distributorName.trim();
+      if (!distributorPricingByName[distributorName]) {
+        distributorPricingByName[distributorName] = {};
+      }
+      distributorPricingByName[distributorName][normalizedNdc] = {
+        fullPricePerUnit: dist.fullPricePerUnit,
+        partialPricePerUnit: dist.partialPricePerUnit,
+      };
     });
-
-    if (supportsAllNdcs) {
-      distributorsWithAllNdcs.add(distName);
-    }
   });
 
-  // Step 7: Group by distributor (only those that support ALL NDCs)
+  // Step 7: Group by distributor - include ALL distributors
   const distributorMap: Record<string, DistributorWithNdcs> = {};
   const ndcsWithDistributors = new Set<string>();
 
-  items.forEach((item) => {
-    const normalizedNdc = item.ndc.trim();
-    const distributorPrices = ndcDistributorPricing[normalizedNdc] || [];
+  // Initialize all distributors from database
+  allDistributorsList.forEach((dbDist) => {
+    const distributorName = dbDist.name?.trim();
+    if (!distributorName) return;
 
-    if (distributorPrices.length === 0) {
-      // This NDC has no distributors - will be added to ndcsWithoutDistributors later
-      return;
+    distributorMap[distributorName] = {
+      distributorName,
+      distributorId: dbDist.id,
+      products: [],
+      totalItems: 0,
+      totalEstimatedValue: 0,
+      ndcsCount: 0,
+    };
+
+    // Format location from address
+    let location: string | undefined;
+    if (dbDist.address) {
+      const addr = dbDist.address;
+      const locationParts: string[] = [];
+
+      if (addr.street) locationParts.push(addr.street);
+      if (addr.city) locationParts.push(addr.city);
+      if (addr.state) locationParts.push(addr.state);
+      if (addr.zipCode) locationParts.push(addr.zipCode);
+      if (addr.country) locationParts.push(addr.country);
+
+      if (locationParts.length > 0) {
+        location = locationParts.join(', ');
+      }
     }
 
-    // Only process distributors that support ALL NDCs
-    distributorPrices.forEach((dist) => {
-      const distributorName = dist.distributorName.trim();
+    distributorMap[distributorName].distributorContact = {
+      email: dbDist.contact_email || undefined,
+      phone: dbDist.contact_phone || undefined,
+      location,
+    };
+  });
 
-      // Skip if this distributor doesn't support all NDCs
-      if (!distributorsWithAllNdcs.has(distributorName)) {
-        return;
-      }
+  // Add products to each distributor
+  items.forEach((item) => {
+    const normalizedNdc = item.ndc.trim();
+    const totalUnits = (item.full || 0) + (item.partial || 0);
 
-      // Mark this NDC as having at least one distributor (that supports all)
-      ndcsWithDistributors.add(normalizedNdc);
-
-      if (!distributorMap[distributorName]) {
-        distributorMap[distributorName] = {
-          distributorName,
-          products: [],
-          totalItems: 0,
-          totalEstimatedValue: 0,
-          ndcsCount: 0,
-        };
-      }
+    // For each distributor, add this product (with pricing if available, null if not)
+    Object.keys(distributorMap).forEach((distributorName) => {
+      const pricing = distributorPricingByName[distributorName]?.[normalizedNdc];
+      
+      const fullPricePerUnit = pricing?.fullPricePerUnit ?? null;
+      const partialPricePerUnit = pricing?.partialPricePerUnit ?? null;
 
       // Calculate total estimated value based on full/partial prices
-      const fullValue = (item.full || 0) * (dist.fullPricePerUnit || 0);
-      const partialValue = (item.partial || 0) * (dist.partialPricePerUnit || 0);
+      const fullValue = (item.full || 0) * (fullPricePerUnit || 0);
+      const partialValue = (item.partial || 0) * (partialPricePerUnit || 0);
       const totalEstimatedValue = fullValue + partialValue;
-      const totalUnits = (item.full || 0) + (item.partial || 0);
+
+      // If this distributor has pricing for this NDC, mark NDC as having a distributor
+      if (pricing && (fullPricePerUnit !== null || partialPricePerUnit !== null)) {
+        ndcsWithDistributors.add(normalizedNdc);
+      }
 
       distributorMap[distributorName].products.push({
         ndc: normalizedNdc,
         productName: ndcProductNames[normalizedNdc],
         full: item.full || 0,
         partial: item.partial || 0,
-        fullPricePerUnit: dist.fullPricePerUnit !== null ? Math.round(dist.fullPricePerUnit * 100) / 100 : null,
-        partialPricePerUnit: dist.partialPricePerUnit !== null ? Math.round(dist.partialPricePerUnit * 100) / 100 : null,
+        fullPricePerUnit: fullPricePerUnit !== null ? Math.round(fullPricePerUnit * 100) / 100 : null,
+        partialPricePerUnit: partialPricePerUnit !== null ? Math.round(partialPricePerUnit * 100) / 100 : null,
         totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
       });
 
@@ -3555,47 +3580,7 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     });
   });
 
-  // Step 8: Fetch distributor contact information
-  const distributorNames = Object.keys(distributorMap);
-  if (distributorNames.length > 0) {
-    const { data: distributors, error: distError } = await db
-      .from('reverse_distributors')
-      .select('id, name, contact_email, contact_phone, address')
-      .in('name', distributorNames);
-
-    if (!distError && distributors) {
-      distributors.forEach((dist) => {
-        if (distributorMap[dist.name]) {
-          distributorMap[dist.name].distributorId = dist.id;
-
-          // Format location from address
-          let location: string | undefined;
-          if (dist.address) {
-            const addr = dist.address;
-            const locationParts: string[] = [];
-
-            if (addr.street) locationParts.push(addr.street);
-            if (addr.city) locationParts.push(addr.city);
-            if (addr.state) locationParts.push(addr.state);
-            if (addr.zipCode) locationParts.push(addr.zipCode);
-            if (addr.country) locationParts.push(addr.country);
-
-            if (locationParts.length > 0) {
-              location = locationParts.join(', ');
-            }
-          }
-
-          distributorMap[dist.name].distributorContact = {
-            email: dist.contact_email || undefined,
-            phone: dist.contact_phone || undefined,
-            location,
-          };
-        }
-      });
-    }
-  }
-
-  // Step 9: Build distributors array and calculate totals
+  // Step 8: Build distributors array and calculate totals
   const distributorsArray: DistributorWithNdcs[] = Object.values(distributorMap).map((dist) => ({
     ...dist,
     totalEstimatedValue: Math.round(dist.totalEstimatedValue * 100) / 100,
@@ -3604,7 +3589,7 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
   // Sort by total estimated value (highest first)
   distributorsArray.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
 
-  // Step 10: Find NDCs without any distributors (that support all NDCs)
+  // Step 9: Find NDCs without any distributors with pricing data
   const ndcsWithoutDistributors: NdcWithoutDistributor[] = [];
   items.forEach((item) => {
     const normalizedNdc = item.ndc.trim();
