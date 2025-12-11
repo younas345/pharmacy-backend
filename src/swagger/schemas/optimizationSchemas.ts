@@ -228,10 +228,15 @@ export const optimizationSchemas = {
         example: 'Amoxicillin 500mg Capsule',
         description: 'Name of the product',
       },
-      quantity: {
+      full: {
         type: 'number',
-        example: 13,
-        description: 'Quantity of the product',
+        example: 5,
+        description: 'Number of full units',
+      },
+      partial: {
+        type: 'number',
+        example: 0,
+        description: 'Number of partial units',
       },
       pricePerUnit: {
         type: 'number',
@@ -241,7 +246,7 @@ export const optimizationSchemas = {
       totalValue: {
         type: 'number',
         example: 11.96,
-        description: 'Total estimated value (pricePerUnit * quantity)',
+        description: 'Total estimated value (pricePerUnit * (full + partial))',
       },
     },
   },
@@ -294,7 +299,7 @@ export const optimizationSchemas = {
       totalItems: {
         type: 'number',
         example: 45,
-        description: 'Total number of items (sum of all quantities)',
+        description: 'Total number of items (sum of all full + partial units)',
       },
       totalEstimatedValue: {
         type: 'number',

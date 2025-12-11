@@ -1693,7 +1693,8 @@ export const getOptimizationRecommendations = async (
 export interface PackageProduct {
   ndc: string;
   productName: string;
-  quantity: number;
+  full: number;
+  partial: number;
   pricePerUnit: number;
   totalValue: number;
 }
@@ -2098,12 +2099,12 @@ export const getPackageRecommendations = async (
       return;
     }
 
-    // Calculate quantity as sum of full_units and partial_units
+    // Get full and partial units
     const fullUnits = (productItem as any).full_units || 0;
     const partialUnits = (productItem as any).partial_units || 0;
-    const quantity = fullUnits + partialUnits || 1;
+    const totalUnits = fullUnits + partialUnits || 1;
     const pricePerUnit = distributorInfo.pricePerUnit;
-    const totalValue = pricePerUnit * quantity;
+    const totalValue = pricePerUnit * totalUnits;
 
     if (!distributorPackagesMap[distributorInfo.distributorName]) {
       distributorPackagesMap[distributorInfo.distributorName] = [];
@@ -2112,7 +2113,8 @@ export const getPackageRecommendations = async (
     distributorPackagesMap[distributorInfo.distributorName].push({
       ndc,
       productName: productItem.product_name || `Product ${ndc}`,
-      quantity,
+      full: fullUnits,
+      partial: partialUnits,
       pricePerUnit,
       totalValue,
     });
@@ -2166,7 +2168,7 @@ export const getPackageRecommendations = async (
   // Step 8: Build package recommendations
   const packages: DistributorPackage[] = Object.entries(distributorPackagesMap).map(
     ([distributorName, products]) => {
-      const totalItems = products.reduce((sum, p) => sum + p.quantity, 0);
+      const totalItems = products.reduce((sum, p) => sum + p.full + p.partial, 0);
       const totalEstimatedValue = products.reduce((sum, p) => sum + p.totalValue, 0);
       const averagePricePerUnit = totalItems > 0 ? totalEstimatedValue / totalItems : 0;
 
@@ -2201,13 +2203,14 @@ export const getPackageRecommendations = async (
     
     const { data: existingPackageItems, error: itemsError } = await db
       .from('custom_package_items')
-      .select('ndc, quantity')
+      .select('ndc, full, partial')
       .in('package_id', packageIds);
 
     if (!itemsError && existingPackageItems) {
       existingPackageItems.forEach((item: any) => {
         const ndc = String(item.ndc).trim();
-        const quantity = Number(item.quantity) || 0;
+        // Sum full + partial as total quantity
+        const quantity = (Number(item.full) || 0) + (Number(item.partial) || 0);
         
         // Normalize NDC (remove dashes) for matching
         // This ensures we match NDCs regardless of dash format (e.g., "12345-678-90" = "1234567890")
@@ -2229,7 +2232,7 @@ export const getPackageRecommendations = async (
     }
   }
 
-  // Step 10: Decrement quantities from suggestions and remove products with quantity <= 0
+  // Step 10: Decrement quantities from suggestions and remove products with total units <= 0
   packages.forEach((pkg) => {
     pkg.products = pkg.products
       .map((product) => {
@@ -2237,24 +2240,48 @@ export const getPackageRecommendations = async (
         const normalizedProductNdc = String(product.ndc).replace(/-/g, '').trim();
         const existingQuantity = ndcToExistingQuantityMap[normalizedProductNdc] || 0;
         
-        // Decrement quantity
-        const newQuantity = product.quantity - existingQuantity;
+        // Calculate total units and decrement
+        const originalTotal = product.full + product.partial;
+        const newTotal = originalTotal - existingQuantity;
         
-        if (newQuantity <= 0) {
-          // Remove product if quantity is 0 or negative
-          console.log(`   ❌ Removing product ${product.ndc} from ${pkg.distributorName} - quantity would be ${newQuantity} (existing: ${existingQuantity}, suggested: ${product.quantity})`);
+        if (newTotal <= 0) {
+          // Remove product if total units is 0 or negative
+          console.log(`   ❌ Removing product ${product.ndc} from ${pkg.distributorName} - total would be ${newTotal} (existing: ${existingQuantity}, suggested: ${originalTotal})`);
           return null;
         }
         
-        // Update product with new quantity and recalculate total value
-        const updatedProduct = {
+        // Distribute remaining units back to full/partial proportionally
+        // If original had only full units, keep in full. If only partial, keep in partial.
+        let newFull = product.full;
+        let newPartial = product.partial;
+        
+        if (product.partial === 0) {
+          // All full units - decrement from full
+          newFull = Math.max(0, product.full - existingQuantity);
+        } else if (product.full === 0) {
+          // All partial units - decrement from partial
+          newPartial = Math.max(0, product.partial - existingQuantity);
+        } else {
+          // Mixed - decrement proportionally from full first, then partial
+          const decrementFromFull = Math.min(existingQuantity, product.full);
+          newFull = product.full - decrementFromFull;
+          newPartial = product.partial - (existingQuantity - decrementFromFull);
+          if (newPartial < 0) {
+            newFull = Math.max(0, newFull + newPartial);
+            newPartial = 0;
+          }
+        }
+        
+        // Update product with new units and recalculate total value
+        const updatedProduct: PackageProduct = {
           ...product,
-          quantity: newQuantity,
-          totalValue: product.pricePerUnit * newQuantity,
+          full: newFull,
+          partial: newPartial,
+          totalValue: product.pricePerUnit * newTotal,
         };
         
         if (existingQuantity > 0) {
-          console.log(`   ✅ Updated product ${product.ndc} in ${pkg.distributorName}: ${product.quantity} → ${newQuantity} (decremented ${existingQuantity})`);
+          console.log(`   ✅ Updated product ${product.ndc} in ${pkg.distributorName}: ${originalTotal} → ${newTotal} (decremented ${existingQuantity})`);
         }
         return updatedProduct;
       })
@@ -2272,7 +2299,7 @@ export const getPackageRecommendations = async (
 
   // Recalculate package totals after filtering
   filteredPackages.forEach((pkg) => {
-    pkg.totalItems = pkg.products.reduce((sum, p) => sum + p.quantity, 0);
+    pkg.totalItems = pkg.products.reduce((sum, p) => sum + p.full + p.partial, 0);
     pkg.totalEstimatedValue = Math.round(pkg.products.reduce((sum, p) => sum + p.totalValue, 0) * 100) / 100;
     pkg.averagePricePerUnit = pkg.totalItems > 0 ? Math.round((pkg.totalEstimatedValue / pkg.totalItems) * 100) / 100 : 0;
   });
@@ -2629,9 +2656,11 @@ export const getPackageRecommendationsByNdcs = async (
       return;
     }
 
-    const quantity = 1; // Default quantity, can be extended to accept quantities per NDC
+    // Default to full=1, partial=0 (can be extended to accept full/partial per NDC)
+    const full = 1;
+    const partial = 0;
     const pricePerUnit = distributorInfo.pricePerUnit;
-    const totalValue = pricePerUnit * quantity;
+    const totalValue = pricePerUnit * (full + partial);
     const productName = ndcToProductNameMap[ndc] || `Product ${ndc}`;
 
     if (!distributorPackagesMap[distributorInfo.distributorName]) {
@@ -2641,7 +2670,8 @@ export const getPackageRecommendationsByNdcs = async (
     distributorPackagesMap[distributorInfo.distributorName].push({
       ndc,
       productName,
-      quantity,
+      full,
+      partial,
       pricePerUnit,
       totalValue,
     });
@@ -2695,7 +2725,7 @@ export const getPackageRecommendationsByNdcs = async (
   // Step 8: Build package recommendations
   const packages: DistributorPackage[] = Object.entries(distributorPackagesMap).map(
     ([distributorName, products]) => {
-      const totalItems = products.reduce((sum, p) => sum + p.quantity, 0);
+      const totalItems = products.reduce((sum, p) => sum + p.full + p.partial, 0);
       const totalEstimatedValue = products.reduce((sum, p) => sum + p.totalValue, 0);
       const averagePricePerUnit = totalItems > 0 ? totalEstimatedValue / totalItems : 0;
 
@@ -3088,15 +3118,18 @@ export const getDistributorSuggestionsByNdc = async (
 export interface NdcSuggestionRequestItem {
   ndc: string;
   product?: string;
-  quantity: number;
+  full: number;   // Full units to return
+  partial: number; // Partial units to return
 }
 
 // Interface for distributor NDC product info
 export interface DistributorNdcProduct {
   ndc: string;
   productName: string;
-  quantity: number;
-  pricePerUnit: number;
+  full: number;
+  partial: number;
+  fullPricePerUnit: number | null;
+  partialPricePerUnit: number | null;
   totalEstimatedValue: number;
 }
 
@@ -3119,7 +3152,8 @@ export interface DistributorWithNdcs {
 export interface NdcWithoutDistributor {
   ndc: string;
   productName: string;
-  quantity: number;
+  full: number;
+  partial: number;
   reason: string;
 }
 
@@ -3133,7 +3167,7 @@ export interface MultipleNdcSuggestionResponse {
   generatedAt: string;
 }
 
-// Get distributor suggestions for multiple NDCs and quantities (grouped by distributor)
+// Get distributor suggestions for multiple NDCs with full/partial quantities (grouped by distributor)
 export const getDistributorSuggestionsByMultipleNdcs = async (
   pharmacyId: string,
   items: NdcSuggestionRequestItem[]
@@ -3143,7 +3177,15 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
   }
 
   if (!items || items.length === 0) {
-    throw new AppError('At least one item with NDC and quantity is required', 400);
+    throw new AppError('At least one item with NDC and full/partial units is required', 400);
+  }
+
+  // Validate each item has at least one of full or partial > 0
+  for (const item of items) {
+    const total = (item.full || 0) + (item.partial || 0);
+    if (total <= 0) {
+      throw new AppError(`NDC ${item.ndc}: At least one of full or partial must be greater than 0`, 400);
+    }
   }
 
   const db = supabaseAdmin;
@@ -3217,58 +3259,75 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     }
   }
 
-  // Step 2: Get all return reports from ALL distributors
+  // Step 2: Get all return reports from ALL distributors with pagination
   // Join with uploaded_documents and reverse_distributors to get distributor name
   // IMPORTANT: Do NOT filter by pharmacy_id - we want ALL distributor prices
   // to find the best prices across all distributors
-  const { data: returnReports, error: reportsError } = await db
-    .from('return_reports')
-    .select(`
-      id,
-      data,
-      document_id,
-      uploaded_documents!inner(
-        reverse_distributor_id,
-        reverse_distributors!inner(
-          id,
-          name
-        )
-      )
-    `);
-
   console.log(`🏥 getDistributorSuggestionsByMultipleNdcs: Fetching return_reports from ALL distributors (no pharmacy_id filter)`);
 
-  if (reportsError) {
-    throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
+  const BATCH_SIZE = 1000;
+  let allReturnReports: any[] = [];
+  let offset = 0;
+  let hasMoreReports = true;
+
+  while (hasMoreReports) {
+    const { data: reportsBatch, error: reportsError } = await db
+      .from('return_reports')
+      .select(`
+        id,
+        data,
+        document_id,
+        uploaded_documents!inner(
+          reverse_distributor_id,
+          report_date,
+          reverse_distributors!inner(
+            id,
+            name
+          )
+        )
+      `)
+      .order('uploaded_documents(report_date)', { ascending: false })
+      .range(offset, offset + BATCH_SIZE - 1);
+
+    if (reportsError) {
+      throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
+    }
+
+    if (reportsBatch && reportsBatch.length > 0) {
+      allReturnReports = allReturnReports.concat(reportsBatch);
+      offset += BATCH_SIZE;
+      if (reportsBatch.length < BATCH_SIZE) {
+        hasMoreReports = false;
+      }
+    } else {
+      hasMoreReports = false;
+    }
   }
 
-  // Step 3: Build pricing map for all NDCs (NDC -> Distributor -> Pricing Data)
-  const ndcDistributorPricingMap: Record<
-    string,
-    Record<
-      string,
-      Array<{
-        pricePerUnit: number;
-        creditAmount: number;
-        quantity: number;
-      }>
-    >
-  > = {};
+  const returnReports = allReturnReports;
+  console.log(`📊 Total return reports fetched: ${returnReports.length}`);
 
-  // Initialize map for all NDCs
+  // Step 3: Build pricing map for all NDCs (NDC -> Distributor -> Pricing Data)
+  // Track FULL and PARTIAL prices separately for each distributor-NDC combination
+  const ndcDistributorFullPriceMap: Record<string, Record<string, number>> = {};  // NDC -> Distributor -> Latest Full Price
+  const ndcDistributorPartialPriceMap: Record<string, Record<string, number>> = {}; // NDC -> Distributor -> Latest Partial Price
+
+  // Initialize maps for all NDCs
   items.forEach((item) => {
     const normalizedNdc = item.ndc.trim();
-    ndcDistributorPricingMap[normalizedNdc] = {};
+    ndcDistributorFullPriceMap[normalizedNdc] = {};
+    ndcDistributorPartialPriceMap[normalizedNdc] = {};
   });
 
   // Process return reports to extract pricing for all NDCs
+  // Since reports are sorted by report_date DESC, first matching record is the latest
   (returnReports || []).forEach((report: any) => {
     const data = report.data;
     // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
-    const distributorName = report.uploaded_documents?.reverse_distributors?.name || 
+    const distributorName = (report.uploaded_documents?.reverse_distributors?.name || 
                            data?.reverseDistributor || 
                            data?.reverseDistributorInfo?.name ||
-                           'Unknown Distributor';
+                           'Unknown Distributor').trim();
 
     if (!distributorName || distributorName === 'Unknown Distributor') {
       return;
@@ -3286,8 +3345,8 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
       }
     }
 
-    reportItems.forEach((item: any) => {
-      const ndcCode = item.ndcCode || item.ndc;
+    reportItems.forEach((reportItem: any) => {
+      const ndcCode = reportItem.ndcCode || reportItem.ndc;
       if (!ndcCode) {
         return;
       }
@@ -3316,55 +3375,88 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
         return;
       }
 
-      const itemQuantity = Number(item.quantity) || 1;
-      const creditAmount = Number(item.creditAmount) || 0;
+      // Get full and partial values from return report item
+      const itemFull = Number(reportItem.full) || 0;
+      const itemPartial = Number(reportItem.partial) || 0;
+
+      const itemQuantity = Number(reportItem.quantity) || 1;
+      const creditAmount = Number(reportItem.creditAmount) || 0;
       const pricePerUnit =
-        Number(item.pricePerUnit) || (itemQuantity > 0 && creditAmount > 0 ? creditAmount / itemQuantity : 0);
+        Number(reportItem.pricePerUnit) || (itemQuantity > 0 && creditAmount > 0 ? creditAmount / itemQuantity : 0);
 
       if (pricePerUnit > 0) {
-        if (!ndcDistributorPricingMap[matchingNdc][distributorName]) {
-          ndcDistributorPricingMap[matchingNdc][distributorName] = [];
+        // Track FULL and PARTIAL prices separately per distributor-NDC
+        // A record is for FULL if full > 0 and partial = 0
+        // A record is for PARTIAL if partial > 0 and full = 0
+        const isFullRecord = itemFull > 0 && itemPartial === 0;
+        const isPartialRecord = itemPartial > 0 && itemFull === 0;
+
+        // Since reports are sorted by date DESC, only store the first (latest) price we encounter
+        if (isFullRecord && !ndcDistributorFullPriceMap[matchingNdc][distributorName]) {
+          ndcDistributorFullPriceMap[matchingNdc][distributorName] = pricePerUnit;
+          console.log(`💰 FULL price for ${distributorName}|${matchingNdc}: ${pricePerUnit}`);
         }
 
-        ndcDistributorPricingMap[matchingNdc][distributorName].push({
-          pricePerUnit,
-          creditAmount,
-          quantity: itemQuantity,
-        });
+        if (isPartialRecord && !ndcDistributorPartialPriceMap[matchingNdc][distributorName]) {
+          ndcDistributorPartialPriceMap[matchingNdc][distributorName] = pricePerUnit;
+          console.log(`💰 PARTIAL price for ${distributorName}|${matchingNdc}: ${pricePerUnit}`);
+        }
       }
     });
   });
 
-  // Step 4: Calculate average price per distributor for each NDC
-  const ndcDistributorAverages: Record<
+  // Step 4: Build distributor pricing info for each NDC
+  // Include distributors that have at least one of full or partial price
+  const ndcDistributorPricing: Record<
     string,
     Array<{
       distributorName: string;
-      averagePricePerUnit: number;
+      fullPricePerUnit: number | null;
+      partialPricePerUnit: number | null;
     }>
   > = {};
 
   items.forEach((item) => {
     const normalizedNdc = item.ndc.trim();
-    const distributorPricing = ndcDistributorPricingMap[normalizedNdc] || {};
-    const averages: Array<{ distributorName: string; averagePricePerUnit: number }> = [];
+    const fullPrices = ndcDistributorFullPriceMap[normalizedNdc] || {};
+    const partialPrices = ndcDistributorPartialPriceMap[normalizedNdc] || {};
+    
+    // Get all unique distributors that have either full or partial price
+    const allDistributors = new Set([...Object.keys(fullPrices), ...Object.keys(partialPrices)]);
+    
+    const pricing: Array<{ distributorName: string; fullPricePerUnit: number | null; partialPricePerUnit: number | null }> = [];
 
-    Object.entries(distributorPricing).forEach(([distributorName, pricingData]) => {
-      const totalPrice = pricingData.reduce((sum, p) => sum + p.pricePerUnit, 0);
-      const count = pricingData.length;
-      const averagePricePerUnit = count > 0 ? totalPrice / count : 0;
+    allDistributors.forEach((distributorName) => {
+      const fullPrice = fullPrices[distributorName] || null;
+      const partialPrice = partialPrices[distributorName] || null;
 
-      if (averagePricePerUnit > 0) {
-        averages.push({
+      // Calculate total estimated value based on what user is requesting
+      const fullValue = (item.full || 0) * (fullPrice || 0);
+      const partialValue = (item.partial || 0) * (partialPrice || 0);
+      const totalValue = fullValue + partialValue;
+
+      // Only include distributor if they have pricing for what user is requesting
+      const hasRequiredPricing = 
+        ((item.full || 0) > 0 && fullPrice !== null) ||
+        ((item.partial || 0) > 0 && partialPrice !== null);
+
+      if (hasRequiredPricing && totalValue > 0) {
+        pricing.push({
           distributorName: distributorName.trim(),
-          averagePricePerUnit,
+          fullPricePerUnit: fullPrice,
+          partialPricePerUnit: partialPrice,
         });
       }
     });
 
-    // Sort by price (highest first)
-    averages.sort((a, b) => b.averagePricePerUnit - a.averagePricePerUnit);
-    ndcDistributorAverages[normalizedNdc] = averages;
+    // Sort by total value (highest first)
+    pricing.sort((a, b) => {
+      const aTotal = ((item.full || 0) * (a.fullPricePerUnit || 0)) + ((item.partial || 0) * (a.partialPricePerUnit || 0));
+      const bTotal = ((item.full || 0) * (b.fullPricePerUnit || 0)) + ((item.partial || 0) * (b.partialPricePerUnit || 0));
+      return bTotal - aTotal;
+    });
+
+    ndcDistributorPricing[normalizedNdc] = pricing;
   });
 
   // Step 5: Get product names for all NDCs
@@ -3406,129 +3498,119 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     ndcProductNames[normalizedNdc] = productName;
   }
 
-  // Step 6: Find distributors that support ALL NDCs
-  // First, get the set of distributors for each NDC
-  const distributorsByNdc: Record<string, Set<string>> = {};
+  // Step 6: Fetch ALL distributors from database (not just those with matching records)
+  const { data: allDistributorsFromDb, error: allDistError } = await db
+    .from('reverse_distributors')
+    .select('id, name, contact_email, contact_phone, address');
+
+  if (allDistError) {
+    console.warn(`⚠️ Failed to fetch all distributors: ${allDistError.message}`);
+  }
+
+  const allDistributorsList = allDistributorsFromDb || [];
+  console.log(`📋 Total distributors in database: ${allDistributorsList.length}`);
+
+  // Build a map for quick lookup of distributor pricing by name
+  const distributorPricingByName: Record<string, Record<string, { fullPricePerUnit: number | null; partialPricePerUnit: number | null }>> = {};
+  
+  // Initialize pricing lookup from ndcDistributorPricing
   items.forEach((item) => {
     const normalizedNdc = item.ndc.trim();
-    const distributorAverages = ndcDistributorAverages[normalizedNdc] || [];
-    distributorsByNdc[normalizedNdc] = new Set(
-      distributorAverages.map((dist) => dist.distributorName.trim())
-    );
-  });
-
-  // Find distributors that appear in ALL NDC sets (support all NDCs)
-  const allDistributorNames = new Set<string>();
-  Object.values(distributorsByNdc).forEach((distSet) => {
-    distSet.forEach((distName) => allDistributorNames.add(distName));
-  });
-
-  const distributorsWithAllNdcs = new Set<string>();
-  allDistributorNames.forEach((distName) => {
-    // Check if this distributor appears in ALL NDC sets
-    const supportsAllNdcs = items.every((item) => {
-      const normalizedNdc = item.ndc.trim();
-      return distributorsByNdc[normalizedNdc]?.has(distName) || false;
+    const distributorPrices = ndcDistributorPricing[normalizedNdc] || [];
+    
+    distributorPrices.forEach((dist) => {
+      const distributorName = dist.distributorName.trim();
+      if (!distributorPricingByName[distributorName]) {
+        distributorPricingByName[distributorName] = {};
+      }
+      distributorPricingByName[distributorName][normalizedNdc] = {
+        fullPricePerUnit: dist.fullPricePerUnit,
+        partialPricePerUnit: dist.partialPricePerUnit,
+      };
     });
-
-    if (supportsAllNdcs) {
-      distributorsWithAllNdcs.add(distName);
-    }
   });
 
-  // Step 7: Group by distributor (only those that support ALL NDCs)
+  // Step 7: Group by distributor - include ALL distributors
   const distributorMap: Record<string, DistributorWithNdcs> = {};
   const ndcsWithDistributors = new Set<string>();
 
-  items.forEach((item) => {
-    const normalizedNdc = item.ndc.trim();
-    const distributorAverages = ndcDistributorAverages[normalizedNdc] || [];
+  // Initialize all distributors from database
+  allDistributorsList.forEach((dbDist) => {
+    const distributorName = dbDist.name?.trim();
+    if (!distributorName) return;
 
-    if (distributorAverages.length === 0) {
-      // This NDC has no distributors - will be added to ndcsWithoutDistributors later
-      return;
+    distributorMap[distributorName] = {
+      distributorName,
+      distributorId: dbDist.id,
+      products: [],
+      totalItems: 0,
+      totalEstimatedValue: 0,
+      ndcsCount: 0,
+    };
+
+    // Format location from address
+    let location: string | undefined;
+    if (dbDist.address) {
+      const addr = dbDist.address;
+      const locationParts: string[] = [];
+
+      if (addr.street) locationParts.push(addr.street);
+      if (addr.city) locationParts.push(addr.city);
+      if (addr.state) locationParts.push(addr.state);
+      if (addr.zipCode) locationParts.push(addr.zipCode);
+      if (addr.country) locationParts.push(addr.country);
+
+      if (locationParts.length > 0) {
+        location = locationParts.join(', ');
+      }
     }
 
-    // Only process distributors that support ALL NDCs
-    distributorAverages.forEach((dist) => {
-      const distributorName = dist.distributorName.trim();
+    distributorMap[distributorName].distributorContact = {
+      email: dbDist.contact_email || undefined,
+      phone: dbDist.contact_phone || undefined,
+      location,
+    };
+  });
 
-      // Skip if this distributor doesn't support all NDCs
-      if (!distributorsWithAllNdcs.has(distributorName)) {
-        return;
+  // Add products to each distributor
+  items.forEach((item) => {
+    const normalizedNdc = item.ndc.trim();
+    const totalUnits = (item.full || 0) + (item.partial || 0);
+
+    // For each distributor, add this product (with pricing if available, null if not)
+    Object.keys(distributorMap).forEach((distributorName) => {
+      const pricing = distributorPricingByName[distributorName]?.[normalizedNdc];
+      
+      const fullPricePerUnit = pricing?.fullPricePerUnit ?? null;
+      const partialPricePerUnit = pricing?.partialPricePerUnit ?? null;
+
+      // Calculate total estimated value based on full/partial prices
+      const fullValue = (item.full || 0) * (fullPricePerUnit || 0);
+      const partialValue = (item.partial || 0) * (partialPricePerUnit || 0);
+      const totalEstimatedValue = fullValue + partialValue;
+
+      // If this distributor has pricing for this NDC, mark NDC as having a distributor
+      if (pricing && (fullPricePerUnit !== null || partialPricePerUnit !== null)) {
+        ndcsWithDistributors.add(normalizedNdc);
       }
-
-      // Mark this NDC as having at least one distributor (that supports all)
-      ndcsWithDistributors.add(normalizedNdc);
-
-      if (!distributorMap[distributorName]) {
-        distributorMap[distributorName] = {
-          distributorName,
-          products: [],
-          totalItems: 0,
-          totalEstimatedValue: 0,
-          ndcsCount: 0,
-        };
-      }
-
-      const pricePerUnit = dist.averagePricePerUnit;
-      const totalEstimatedValue = pricePerUnit * item.quantity;
 
       distributorMap[distributorName].products.push({
         ndc: normalizedNdc,
         productName: ndcProductNames[normalizedNdc],
-        quantity: item.quantity,
-        pricePerUnit: Math.round(pricePerUnit * 100) / 100,
+        full: item.full || 0,
+        partial: item.partial || 0,
+        fullPricePerUnit: fullPricePerUnit !== null ? Math.round(fullPricePerUnit * 100) / 100 : null,
+        partialPricePerUnit: partialPricePerUnit !== null ? Math.round(partialPricePerUnit * 100) / 100 : null,
         totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
       });
 
-      distributorMap[distributorName].totalItems += item.quantity;
+      distributorMap[distributorName].totalItems += totalUnits;
       distributorMap[distributorName].totalEstimatedValue += totalEstimatedValue;
       distributorMap[distributorName].ndcsCount += 1;
     });
   });
 
-  // Step 8: Fetch distributor contact information
-  const distributorNames = Object.keys(distributorMap);
-  if (distributorNames.length > 0) {
-    const { data: distributors, error: distError } = await db
-      .from('reverse_distributors')
-      .select('id, name, contact_email, contact_phone, address')
-      .in('name', distributorNames);
-
-    if (!distError && distributors) {
-      distributors.forEach((dist) => {
-        if (distributorMap[dist.name]) {
-          distributorMap[dist.name].distributorId = dist.id;
-
-          // Format location from address
-          let location: string | undefined;
-          if (dist.address) {
-            const addr = dist.address;
-            const locationParts: string[] = [];
-
-            if (addr.street) locationParts.push(addr.street);
-            if (addr.city) locationParts.push(addr.city);
-            if (addr.state) locationParts.push(addr.state);
-            if (addr.zipCode) locationParts.push(addr.zipCode);
-            if (addr.country) locationParts.push(addr.country);
-
-            if (locationParts.length > 0) {
-              location = locationParts.join(', ');
-            }
-          }
-
-          distributorMap[dist.name].distributorContact = {
-            email: dist.contact_email || undefined,
-            phone: dist.contact_phone || undefined,
-            location,
-          };
-        }
-      });
-    }
-  }
-
-  // Step 9: Build distributors array and calculate totals
+  // Step 8: Build distributors array and calculate totals
   const distributorsArray: DistributorWithNdcs[] = Object.values(distributorMap).map((dist) => ({
     ...dist,
     totalEstimatedValue: Math.round(dist.totalEstimatedValue * 100) / 100,
@@ -3537,7 +3619,7 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
   // Sort by total estimated value (highest first)
   distributorsArray.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
 
-  // Step 10: Find NDCs without any distributors (that support all NDCs)
+  // Step 9: Find NDCs without any distributors with pricing data
   const ndcsWithoutDistributors: NdcWithoutDistributor[] = [];
   items.forEach((item) => {
     const normalizedNdc = item.ndc.trim();
@@ -3545,19 +3627,21 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
       ndcsWithoutDistributors.push({
         ndc: normalizedNdc,
         productName: ndcProductNames[normalizedNdc],
-        quantity: item.quantity,
+        full: item.full || 0,
+        partial: item.partial || 0,
         reason: 'No distributor found offering returns for this NDC',
       });
     }
   });
 
-  // Calculate total estimated value
+  // Calculate total estimated value and total items
   const totalEstimatedValue = distributorsArray.reduce((sum, dist) => sum + dist.totalEstimatedValue, 0);
+  const totalItems = items.reduce((sum, item) => sum + (item.full || 0) + (item.partial || 0), 0);
 
   return {
     distributors: distributorsArray,
     ndcsWithoutDistributors,
-    totalItems: items.length,
+    totalItems,
     totalDistributors: distributorsArray.length,
     totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
     generatedAt: new Date().toISOString(),
