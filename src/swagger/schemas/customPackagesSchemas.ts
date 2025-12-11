@@ -1,7 +1,7 @@
 export const customPackagesSchemas = {
   CustomPackageItem: {
     type: 'object',
-    required: ['ndc', 'quantity'],
+    required: ['ndc', 'full', 'partial'],
     properties: {
       ndc: {
         type: 'string',
@@ -18,11 +18,17 @@ export const customPackagesSchemas = {
         example: 'Fluoxetine',
         description: 'Name of the product (snake_case - alternative format)',
       },
-      quantity: {
+      full: {
         type: 'number',
-        example: 50,
-        description: 'Quantity of the product',
-        minimum: 1,
+        example: 5,
+        description: 'Number of full units',
+        minimum: 0,
+      },
+      partial: {
+        type: 'number',
+        example: 0,
+        description: 'Number of partial units',
+        minimum: 0,
       },
       pricePerUnit: {
         type: 'number',
@@ -39,17 +45,17 @@ export const customPackagesSchemas = {
       totalValue: {
         type: 'number',
         example: 125.00,
-        description: 'Total value (quantity × pricePerUnit) (camelCase)',
+        description: 'Total value ((full + partial) × pricePerUnit) (camelCase)',
         minimum: 0,
       },
       total_value: {
         type: 'number',
         example: 125.00,
-        description: 'Total value (quantity × pricePerUnit) (snake_case - alternative format)',
+        description: 'Total value ((full + partial) × pricePerUnit) (snake_case - alternative format)',
         minimum: 0,
       },
     },
-    description: 'Package item. Accepts both camelCase (productName, pricePerUnit, totalValue) and snake_case (product_name, price_per_unit, total_value) formats. At least one format for product name, price, and total value must be provided.',
+    description: 'Package item with full and partial unit counts. At least one of full or partial must be greater than 0.',
   },
   CreateCustomPackageRequest: {
     type: 'object',
@@ -192,7 +198,7 @@ export const customPackagesSchemas = {
       totalItems: {
         type: 'number',
         example: 50,
-        description: 'Total number of items (sum of all quantities)',
+        description: 'Total number of items (sum of all full + partial units)',
       },
       totalEstimatedValue: {
         type: 'number',

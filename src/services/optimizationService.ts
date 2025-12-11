@@ -2201,13 +2201,14 @@ export const getPackageRecommendations = async (
     
     const { data: existingPackageItems, error: itemsError } = await db
       .from('custom_package_items')
-      .select('ndc, quantity')
+      .select('ndc, full, partial')
       .in('package_id', packageIds);
 
     if (!itemsError && existingPackageItems) {
       existingPackageItems.forEach((item: any) => {
         const ndc = String(item.ndc).trim();
-        const quantity = Number(item.quantity) || 0;
+        // Sum full + partial as total quantity
+        const quantity = (Number(item.full) || 0) + (Number(item.partial) || 0);
         
         // Normalize NDC (remove dashes) for matching
         // This ensures we match NDCs regardless of dash format (e.g., "12345-678-90" = "1234567890")

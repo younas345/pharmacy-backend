@@ -6,7 +6,8 @@ export interface CustomPackageItem {
   ndc: string;
   productName?: string;
   product_name?: string; // Accept snake_case for backward compatibility
-  quantity: number;
+  full: number; // Number of full units
+  partial: number; // Number of partial units
   pricePerUnit?: number;
   price_per_unit?: number; // Accept snake_case for backward compatibility
   totalValue?: number;
@@ -96,10 +97,14 @@ export const createCustomPackage = async (
   // Validate and normalize items
   const normalizedItems = packageData.items.map((item: any) => {
     // Handle both camelCase and snake_case field names
+    const fullValue = typeof item.full === 'number' ? item.full : 0;
+    const partialValue = typeof item.partial === 'number' ? item.partial : 0;
+
     const normalizedItem = {
       ndc: item.ndc,
       productName: item.productName || item.product_name || '',
-      quantity: item.quantity,
+      full: fullValue,
+      partial: partialValue,
       pricePerUnit: item.pricePerUnit || item.price_per_unit || 0,
       totalValue: item.totalValue || item.total_value || 0,
     };
@@ -111,8 +116,15 @@ export const createCustomPackage = async (
     if (!normalizedItem.productName) {
       throw new AppError('Product name is required for all items', 400);
     }
-    if (!normalizedItem.quantity || normalizedItem.quantity <= 0) {
-      throw new AppError('Quantity must be greater than 0 for all items', 400);
+    // Validate full and partial - at least one must be > 0
+    if (normalizedItem.full < 0) {
+      throw new AppError('Full units cannot be negative', 400);
+    }
+    if (normalizedItem.partial < 0) {
+      throw new AppError('Partial units cannot be negative', 400);
+    }
+    if (normalizedItem.full === 0 && normalizedItem.partial === 0) {
+      throw new AppError('At least one of full or partial must be greater than 0 for all items', 400);
     }
     if (normalizedItem.pricePerUnit < 0) {
       throw new AppError('Price per unit must be greater than or equal to 0', 400);
@@ -124,8 +136,8 @@ export const createCustomPackage = async (
     return normalizedItem;
   });
 
-  // Calculate totals using normalized items
-  const totalItems = normalizedItems.reduce((sum, item) => sum + item.quantity, 0);
+  // Calculate totals using normalized items (full + partial)
+  const totalItems = normalizedItems.reduce((sum, item) => sum + item.full + item.partial, 0);
   const totalEstimatedValue = normalizedItems.reduce((sum, item) => sum + item.totalValue, 0);
 
   // Generate package number
@@ -192,7 +204,8 @@ export const createCustomPackage = async (
     package_id: packageRecord.id,
     ndc: item.ndc,
     product_name: item.productName,
-    quantity: item.quantity,
+    full: item.full,
+    partial: item.partial,
     price_per_unit: item.pricePerUnit,
     total_value: item.totalValue,
   }));
@@ -327,7 +340,8 @@ export const getCustomPackages = async (
     itemsByPackage[item.package_id].push({
       ndc: item.ndc,
       productName: item.product_name,
-      quantity: item.quantity,
+      full: item.full || 0,
+      partial: item.partial || 0,
       pricePerUnit: item.price_per_unit,
       totalValue: item.total_value,
     });
@@ -518,7 +532,8 @@ export const getCustomPackageById = async (
     items: (items || []).map((item: any) => ({
       ndc: item.ndc,
       productName: item.product_name,
-      quantity: item.quantity,
+      full: item.full || 0,
+      partial: item.partial || 0,
       pricePerUnit: item.price_per_unit,
       totalValue: item.total_value,
     })),
@@ -729,7 +744,8 @@ export const updatePackageStatus = async (
     items: (items || []).map((item: any) => ({
       ndc: item.ndc,
       productName: item.product_name,
-      quantity: item.quantity,
+      full: item.full || 0,
+      partial: item.partial || 0,
       pricePerUnit: item.price_per_unit,
       totalValue: item.total_value,
     })),

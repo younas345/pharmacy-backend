@@ -137,7 +137,7 @@ export const getProductListItems = async (pharmacyId: string): Promise<ProductLi
   // Get all items from ALL packages to calculate quantities used
   const { data: packageItems, error: packageItemsError } = await db
     .from('custom_package_items')
-    .select('ndc, quantity')
+    .select('ndc, full, partial')
     .in('package_id', allPackageIds);
 
   if (packageItemsError) {
@@ -152,7 +152,8 @@ export const getProductListItems = async (pharmacyId: string): Promise<ProductLi
     if (!usedQuantityMap[normalizedNdc]) {
       usedQuantityMap[normalizedNdc] = 0;
     }
-    usedQuantityMap[normalizedNdc] += pkgItem.quantity || 0;
+    // Sum full + partial as total quantity used
+    usedQuantityMap[normalizedNdc] += (pkgItem.full || 0) + (pkgItem.partial || 0);
   });
 
   console.log('\n========== PRODUCT LIST ITEMS DEBUG ==========');
