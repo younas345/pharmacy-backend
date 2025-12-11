@@ -13,3 +13,4 @@ ADD COLUMN IF NOT EXISTS dea_number character varying(50) null;
 COMMENT ON COLUMN public.pharmacy.npi_number IS 'National Provider Identifier (NPI) number';
 COMMENT ON COLUMN public.pharmacy.dea_number IS 'Drug Enforcement Administration (DEA) number';
 
+

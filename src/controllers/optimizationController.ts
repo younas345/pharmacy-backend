@@ -120,9 +120,24 @@ export const getDistributorSuggestionsHandler = catchAsync(
         if (!item.ndc) {
           throw new AppError(`Item ${i + 1}: NDC is required`, 400);
         }
-        if (!item.quantity || typeof item.quantity !== 'number' || item.quantity <= 0) {
-          throw new AppError(`Item ${i + 1}: Quantity is required and must be a positive number`, 400);
+        
+        // Validate full and partial - at least one must be provided and > 0
+        const fullValue = typeof item.full === 'number' ? item.full : 0;
+        const partialValue = typeof item.partial === 'number' ? item.partial : 0;
+        
+        if (fullValue < 0) {
+          throw new AppError(`Item ${i + 1}: Full units cannot be negative`, 400);
         }
+        if (partialValue < 0) {
+          throw new AppError(`Item ${i + 1}: Partial units cannot be negative`, 400);
+        }
+        if (fullValue === 0 && partialValue === 0) {
+          throw new AppError(`Item ${i + 1}: At least one of full or partial must be greater than 0`, 400);
+        }
+        
+        // Normalize the item to ensure full and partial are numbers
+        item.full = fullValue;
+        item.partial = partialValue;
       }
 
       const suggestions = await getDistributorSuggestionsByMultipleNdcs(pharmacyId, items);
