@@ -38,34 +38,16 @@ export const getDashboardSummary = async (pharmacyId: string): Promise<Dashboard
     .select('*', { count: 'exact', head: true })
     .eq('added_by', pharmacyId);
 
-  // Get top distributor count using the same logic as getTopDistributors
-  // Get all active distributors
-  const { data: distributors, error: distError } = await db
+  // Get top distributor count - count all active distributors
+  // This matches the getTopDistributors API which returns all active distributors
+  // regardless of whether they have documents with this pharmacy
+  const { count: topDistributorCount, error: distError } = await db
     .from('reverse_distributors')
-    .select('id')
+    .select('*', { count: 'exact', head: true })
     .eq('is_active', true);
 
   if (distError) {
     throw new AppError(`Failed to fetch distributors: ${distError.message}`, 400);
-  }
-
-  let topDistributorCount = 0;
-  if (distributors && distributors.length > 0) {
-    // Count distributors that have at least one document for this pharmacy
-    // Using the same logic as getTopDistributors - a distributor is considered "top" 
-    // if they have documents with this pharmacy
-    for (const dist of distributors) {
-      const { data: documents, error: docError } = await db
-        .from('uploaded_documents')
-        .select('id')
-        .eq('pharmacy_id', pharmacyId)
-        .eq('reverse_distributor_id', dist.id)
-        .limit(1);
-
-      if (!docError && documents && documents.length > 0) {
-        topDistributorCount++;
-      }
-    }
   }
 
   // Get package statistics using the same logic as /api/optimization/custom-packages
@@ -225,7 +207,7 @@ export const getDashboardSummary = async (pharmacyId: string): Promise<Dashboard
 
   return {
     totalPharmacyAddedProducts: pharmacyAddedProductsCount || 0,
-    topDistributorCount: topDistributorCount,
+    topDistributorCount: topDistributorCount || 0,
     totalPackages: totalPackages,
     deliveredPackages: deliveredPackagesCount || 0,
     nonDeliveredPackages: nonDeliveredPackagesCount || 0,
