@@ -1693,7 +1693,8 @@ export const getOptimizationRecommendations = async (
 export interface PackageProduct {
   ndc: string;
   productName: string;
-  quantity: number;
+  full: number;
+  partial: number;
   pricePerUnit: number;
   totalValue: number;
 }
@@ -2098,12 +2099,12 @@ export const getPackageRecommendations = async (
       return;
     }
 
-    // Calculate quantity as sum of full_units and partial_units
+    // Get full and partial units
     const fullUnits = (productItem as any).full_units || 0;
     const partialUnits = (productItem as any).partial_units || 0;
-    const quantity = fullUnits + partialUnits || 1;
+    const totalUnits = fullUnits + partialUnits || 1;
     const pricePerUnit = distributorInfo.pricePerUnit;
-    const totalValue = pricePerUnit * quantity;
+    const totalValue = pricePerUnit * totalUnits;
 
     if (!distributorPackagesMap[distributorInfo.distributorName]) {
       distributorPackagesMap[distributorInfo.distributorName] = [];
@@ -2112,7 +2113,8 @@ export const getPackageRecommendations = async (
     distributorPackagesMap[distributorInfo.distributorName].push({
       ndc,
       productName: productItem.product_name || `Product ${ndc}`,
-      quantity,
+      full: fullUnits,
+      partial: partialUnits,
       pricePerUnit,
       totalValue,
     });
@@ -2166,7 +2168,7 @@ export const getPackageRecommendations = async (
   // Step 8: Build package recommendations
   const packages: DistributorPackage[] = Object.entries(distributorPackagesMap).map(
     ([distributorName, products]) => {
-      const totalItems = products.reduce((sum, p) => sum + p.quantity, 0);
+      const totalItems = products.reduce((sum, p) => sum + p.full + p.partial, 0);
       const totalEstimatedValue = products.reduce((sum, p) => sum + p.totalValue, 0);
       const averagePricePerUnit = totalItems > 0 ? totalEstimatedValue / totalItems : 0;
 
@@ -2230,7 +2232,7 @@ export const getPackageRecommendations = async (
     }
   }
 
-  // Step 10: Decrement quantities from suggestions and remove products with quantity <= 0
+  // Step 10: Decrement quantities from suggestions and remove products with total units <= 0
   packages.forEach((pkg) => {
     pkg.products = pkg.products
       .map((product) => {
@@ -2238,24 +2240,48 @@ export const getPackageRecommendations = async (
         const normalizedProductNdc = String(product.ndc).replace(/-/g, '').trim();
         const existingQuantity = ndcToExistingQuantityMap[normalizedProductNdc] || 0;
         
-        // Decrement quantity
-        const newQuantity = product.quantity - existingQuantity;
+        // Calculate total units and decrement
+        const originalTotal = product.full + product.partial;
+        const newTotal = originalTotal - existingQuantity;
         
-        if (newQuantity <= 0) {
-          // Remove product if quantity is 0 or negative
-          console.log(`   ❌ Removing product ${product.ndc} from ${pkg.distributorName} - quantity would be ${newQuantity} (existing: ${existingQuantity}, suggested: ${product.quantity})`);
+        if (newTotal <= 0) {
+          // Remove product if total units is 0 or negative
+          console.log(`   ❌ Removing product ${product.ndc} from ${pkg.distributorName} - total would be ${newTotal} (existing: ${existingQuantity}, suggested: ${originalTotal})`);
           return null;
         }
         
-        // Update product with new quantity and recalculate total value
-        const updatedProduct = {
+        // Distribute remaining units back to full/partial proportionally
+        // If original had only full units, keep in full. If only partial, keep in partial.
+        let newFull = product.full;
+        let newPartial = product.partial;
+        
+        if (product.partial === 0) {
+          // All full units - decrement from full
+          newFull = Math.max(0, product.full - existingQuantity);
+        } else if (product.full === 0) {
+          // All partial units - decrement from partial
+          newPartial = Math.max(0, product.partial - existingQuantity);
+        } else {
+          // Mixed - decrement proportionally from full first, then partial
+          const decrementFromFull = Math.min(existingQuantity, product.full);
+          newFull = product.full - decrementFromFull;
+          newPartial = product.partial - (existingQuantity - decrementFromFull);
+          if (newPartial < 0) {
+            newFull = Math.max(0, newFull + newPartial);
+            newPartial = 0;
+          }
+        }
+        
+        // Update product with new units and recalculate total value
+        const updatedProduct: PackageProduct = {
           ...product,
-          quantity: newQuantity,
-          totalValue: product.pricePerUnit * newQuantity,
+          full: newFull,
+          partial: newPartial,
+          totalValue: product.pricePerUnit * newTotal,
         };
         
         if (existingQuantity > 0) {
-          console.log(`   ✅ Updated product ${product.ndc} in ${pkg.distributorName}: ${product.quantity} → ${newQuantity} (decremented ${existingQuantity})`);
+          console.log(`   ✅ Updated product ${product.ndc} in ${pkg.distributorName}: ${originalTotal} → ${newTotal} (decremented ${existingQuantity})`);
         }
         return updatedProduct;
       })
@@ -2273,7 +2299,7 @@ export const getPackageRecommendations = async (
 
   // Recalculate package totals after filtering
   filteredPackages.forEach((pkg) => {
-    pkg.totalItems = pkg.products.reduce((sum, p) => sum + p.quantity, 0);
+    pkg.totalItems = pkg.products.reduce((sum, p) => sum + p.full + p.partial, 0);
     pkg.totalEstimatedValue = Math.round(pkg.products.reduce((sum, p) => sum + p.totalValue, 0) * 100) / 100;
     pkg.averagePricePerUnit = pkg.totalItems > 0 ? Math.round((pkg.totalEstimatedValue / pkg.totalItems) * 100) / 100 : 0;
   });
@@ -2630,9 +2656,11 @@ export const getPackageRecommendationsByNdcs = async (
       return;
     }
 
-    const quantity = 1; // Default quantity, can be extended to accept quantities per NDC
+    // Default to full=1, partial=0 (can be extended to accept full/partial per NDC)
+    const full = 1;
+    const partial = 0;
     const pricePerUnit = distributorInfo.pricePerUnit;
-    const totalValue = pricePerUnit * quantity;
+    const totalValue = pricePerUnit * (full + partial);
     const productName = ndcToProductNameMap[ndc] || `Product ${ndc}`;
 
     if (!distributorPackagesMap[distributorInfo.distributorName]) {
@@ -2642,7 +2670,8 @@ export const getPackageRecommendationsByNdcs = async (
     distributorPackagesMap[distributorInfo.distributorName].push({
       ndc,
       productName,
-      quantity,
+      full,
+      partial,
       pricePerUnit,
       totalValue,
     });
@@ -2696,7 +2725,7 @@ export const getPackageRecommendationsByNdcs = async (
   // Step 8: Build package recommendations
   const packages: DistributorPackage[] = Object.entries(distributorPackagesMap).map(
     ([distributorName, products]) => {
-      const totalItems = products.reduce((sum, p) => sum + p.quantity, 0);
+      const totalItems = products.reduce((sum, p) => sum + p.full + p.partial, 0);
       const totalEstimatedValue = products.reduce((sum, p) => sum + p.totalValue, 0);
       const averagePricePerUnit = totalItems > 0 ? totalEstimatedValue / totalItems : 0;
 
