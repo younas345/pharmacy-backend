@@ -229,3 +229,104 @@ export const getDashboardSummary = async (pharmacyId: string): Promise<Dashboard
   };
 };
 
+// Interface for period earnings data point (monthly or yearly)
+export interface PeriodEarnings {
+  period: string; // Format: "YYYY-MM" for monthly, "YYYY" for yearly
+  label: string; // Human-readable label (e.g., "December 2025" or "2025")
+  earnings: number;
+  documentsCount: number;
+}
+
+// Interface for earnings by distributor
+export interface DistributorEarnings {
+  distributorId: string;
+  distributorName: string;
+  totalEarnings: number;
+  documentsCount: number;
+}
+
+// Interface for historical earnings response
+export interface HistoricalEarningsResponse {
+  periodEarnings: PeriodEarnings[];
+  totalEarnings: number;
+  averagePeriodEarnings: number;
+  totalDocuments: number;
+  byDistributor: DistributorEarnings[];
+  period: {
+    startDate: string;
+    endDate: string;
+    type: 'monthly' | 'yearly';
+    periods: number;
+  };
+}
+
+/**
+ * Get historical earnings for a pharmacy grouped by month or year
+ * Uses PostgreSQL function for all aggregation - no custom JS logic
+ * Data comes from uploaded_documents.total_credit_amount grouped by report_date
+ */
+export const getHistoricalEarnings = async (
+  pharmacyId: string,
+  periodType: 'monthly' | 'yearly' = 'monthly',
+  periods: number = 12
+): Promise<HistoricalEarningsResponse> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  // Calculate date range based on period type
+  const now = new Date();
+  let startDateStr: string;
+  let endDateStr: string;
+  
+  if (periodType === 'yearly') {
+    const startYear = now.getFullYear() - periods;
+    const endYear = now.getFullYear();
+    startDateStr = `${startYear}-01-01`;
+    endDateStr = `${endYear}-12-31`;
+  } else {
+    const startYear = now.getFullYear();
+    const startMonth = now.getMonth() - periods;
+    const startDate = new Date(startYear, startMonth, 1);
+    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    
+    const formatDateStr = (d: Date): string => {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    
+    startDateStr = formatDateStr(startDate);
+    endDateStr = formatDateStr(endDate);
+  }
+
+  console.log(`📊 Fetching historical earnings via RPC for pharmacy ${pharmacyId} from ${startDateStr} to ${endDateStr} (${periodType}, ${periods} periods)`);
+
+  // Call PostgreSQL function - all aggregation done in database
+  const { data, error } = await db.rpc('get_historical_earnings', {
+    p_pharmacy_id: pharmacyId,
+    p_period_type: periodType,
+    p_start_date: startDateStr,
+    p_end_date: endDateStr
+  });
+
+  if (error) {
+    throw new AppError(`Failed to fetch historical earnings: ${error.message}`, 400);
+  }
+
+  // Return database result directly - response structure matches interface
+  return {
+    periodEarnings: data.periodEarnings || [],
+    totalEarnings: data.totalEarnings || 0,
+    averagePeriodEarnings: data.averagePeriodEarnings || 0,
+    totalDocuments: data.totalDocuments || 0,
+    byDistributor: data.byDistributor || [],
+    period: {
+      startDate: startDateStr,
+      endDate: endDateStr,
+      type: periodType,
+      periods,
+    },
+  };
+};
+
