@@ -2,54 +2,6 @@ import { supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
 // import { getOptimizationRecommendations } from './optimizationService';
 
-/**
- * Fetch all records from a Supabase query with pagination
- * Supabase has a default limit of 1000 records, so we need to paginate to get all
- * 
- * @param queryBuilder - Supabase query builder (will be cloned for each batch)
- * @param batchSize - Number of records to fetch per batch (default 1000)
- * @returns Array of all records fetched across all batches
- */
-const fetchAllRecords = async <T>(
-  queryBuilder: any,
-  batchSize: number = 1000
-): Promise<T[]> => {
-  const allRecords: T[] = [];
-  let offset = 0;
-  let hasMore = true;
-  let batchNumber = 0;
-
-  while (hasMore) {
-    batchNumber++;
-    // Create a new query builder for this batch (Supabase builders are immutable)
-    const { data, error } = await queryBuilder
-      .range(offset, offset + batchSize - 1);
-
-    if (error) {
-      throw new AppError(`Failed to fetch records (batch ${batchNumber}): ${error.message}`, 400);
-    }
-
-    if (data && data.length > 0) {
-      allRecords.push(...data);
-      offset += batchSize;
-      
-      // Log progress for large datasets
-      if (batchNumber % 10 === 0 || data.length < batchSize) {
-        console.log(`   📦 Fetched batch ${batchNumber}: ${allRecords.length} total records so far...`);
-      }
-      
-      // If we got fewer records than batch size, we've reached the end
-      if (data.length < batchSize) {
-        hasMore = false;
-      }
-    } else {
-      hasMore = false;
-    }
-  }
-
-  return allRecords;
-};
-
 export interface DashboardSummary {
   totalPharmacyAddedProducts: number;
   topDistributorCount: number;
@@ -310,6 +262,7 @@ export interface HistoricalEarningsResponse {
 
 /**
  * Get historical earnings for a pharmacy grouped by month or year
+ * Uses PostgreSQL function for all aggregation - no custom JS logic
  * Data comes from uploaded_documents.total_credit_amount grouped by report_date
  */
 export const getHistoricalEarnings = async (
@@ -324,190 +277,50 @@ export const getHistoricalEarnings = async (
   const db = supabaseAdmin;
 
   // Calculate date range based on period type
-  // Helper function to format date as YYYY-MM-DD without timezone issues
-  const formatDateStr = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
   const now = new Date();
   let startDateStr: string;
   let endDateStr: string;
   
   if (periodType === 'yearly') {
-    // For yearly: go back 'periods' years from current year
     const startYear = now.getFullYear() - periods;
     const endYear = now.getFullYear();
-    startDateStr = `${startYear}-01-01`; // January 1st of start year
-    endDateStr = `${endYear}-12-31`; // December 31st of current year
+    startDateStr = `${startYear}-01-01`;
+    endDateStr = `${endYear}-12-31`;
   } else {
-    // For monthly: go back 'periods' months from current month
-    const startDate = new Date(now.getFullYear(), now.getMonth() - periods, 1);
-    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of current month
+    const startYear = now.getFullYear();
+    const startMonth = now.getMonth() - periods;
+    const startDate = new Date(startYear, startMonth, 1);
+    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    
+    const formatDateStr = (d: Date): string => {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    
     startDateStr = formatDateStr(startDate);
     endDateStr = formatDateStr(endDate);
   }
 
-  console.log(`📊 Fetching historical earnings for pharmacy ${pharmacyId} from ${startDateStr} to ${endDateStr} (${periodType}, ${periods} periods)`);
+  console.log(`📊 Fetching historical earnings via RPC for pharmacy ${pharmacyId} from ${startDateStr} to ${endDateStr} (${periodType}, ${periods} periods)`);
 
-  // Fetch ALL documents with earnings data within the date range (with pagination)
-  // Supabase has a default limit of 1000, so we need to fetch all pages
-  console.log(`📥 Fetching ALL uploaded_documents for pharmacy ${pharmacyId} (with pagination)...`);
-  
-  const documentsQueryBuilder = db
-    .from('uploaded_documents')
-    .select(`
-      id,
-      report_date,
-      total_credit_amount,
-      reverse_distributor_id,
-      reverse_distributors (
-        id,
-        name
-      )
-    `)
-    .eq('pharmacy_id', pharmacyId)
-    .gte('report_date', startDateStr)
-    .lte('report_date', endDateStr)
-    .not('total_credit_amount', 'is', null)
-    .order('report_date', { ascending: true });
-
-  const documents = await fetchAllRecords(documentsQueryBuilder);
-  console.log(`✅ Fetched ${documents.length} total documents for pharmacy in date range (${startDateStr} to ${endDateStr})`);
-
-  // Initialize period earnings map
-  const periodEarningsMap: Record<string, { earnings: number; documentsCount: number }> = {};
-  
-  // Helper function to get period key from date
-  // Parse date string directly to avoid timezone issues
-  // dateStr format: "YYYY-MM-DD"
-  const getPeriodKey = (dateStr: string): string => {
-    const [year, month] = dateStr.split('-');
-    if (periodType === 'yearly') {
-      return year;
-    } else {
-      // monthly: YYYY-MM
-      return `${year}-${month}`;
-    }
-  };
-
-  // Helper function to get period label
-  const getPeriodLabel = (periodKey: string): string => {
-    if (periodType === 'yearly') {
-      return periodKey;
-    } else {
-      // monthly: Convert "YYYY-MM" to "Month YYYY"
-      const [year, month] = periodKey.split('-');
-      const monthNames = [
-        'January', 'February', 'March', 'April', 'May', 'June',
-        'July', 'August', 'September', 'October', 'November', 'December'
-      ];
-      return `${monthNames[parseInt(month) - 1]} ${year}`;
-    }
-  };
-
-  // Fill in all periods in the range
-  // Use direct string manipulation to avoid timezone issues
-  if (periodType === 'yearly') {
-    const startYear = parseInt(startDateStr.split('-')[0]);
-    const endYear = parseInt(endDateStr.split('-')[0]);
-    for (let year = startYear; year <= endYear; year++) {
-      const periodKey = year.toString();
-      periodEarningsMap[periodKey] = { earnings: 0, documentsCount: 0 };
-    }
-  } else {
-    // monthly
-    const [startYear, startMonth] = startDateStr.split('-').map(Number);
-    const [endYear, endMonth] = endDateStr.split('-').map(Number);
-    
-    let currentYear = startYear;
-    let currentMonth = startMonth;
-    
-    while (currentYear < endYear || (currentYear === endYear && currentMonth <= endMonth)) {
-      const periodKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
-      periodEarningsMap[periodKey] = { earnings: 0, documentsCount: 0 };
-      
-      currentMonth++;
-      if (currentMonth > 12) {
-        currentMonth = 1;
-        currentYear++;
-      }
-    }
-  }
-
-  // Group earnings by distributor
-  const distributorEarningsMap: Record<string, { 
-    distributorName: string; 
-    totalEarnings: number; 
-    documentsCount: number 
-  }> = {};
-
-  // Process documents
-  let totalEarnings = 0;
-  let totalDocuments = 0;
-
-  (documents || []).forEach((doc: any) => {
-    const reportDate = doc.report_date;
-    const creditAmount = Number(doc.total_credit_amount) || 0;
-
-    if (reportDate) {
-      const periodKey = getPeriodKey(reportDate);
-      if (periodEarningsMap[periodKey]) {
-        periodEarningsMap[periodKey].earnings += creditAmount;
-        periodEarningsMap[periodKey].documentsCount += 1;
-        totalEarnings += creditAmount;
-        totalDocuments += 1;
-      }
-    }
-
-    // Track by distributor
-    const distributorId = doc.reverse_distributor_id;
-    const distributorName = doc.reverse_distributors?.name || 'Unknown Distributor';
-    
-    if (distributorId) {
-      if (!distributorEarningsMap[distributorId]) {
-        distributorEarningsMap[distributorId] = {
-          distributorName,
-          totalEarnings: 0,
-          documentsCount: 0,
-        };
-      }
-      distributorEarningsMap[distributorId].totalEarnings += creditAmount;
-      distributorEarningsMap[distributorId].documentsCount += 1;
-    }
+  // Call PostgreSQL function - all aggregation done in database
+  const { data, error } = await db.rpc('get_historical_earnings', {
+    p_pharmacy_id: pharmacyId,
+    p_period_type: periodType,
+    p_start_date: startDateStr,
+    p_end_date: endDateStr
   });
 
-  // Convert maps to arrays
-  const periodEarnings: PeriodEarnings[] = Object.entries(periodEarningsMap)
-    .map(([period, data]) => ({
-      period,
-      label: getPeriodLabel(period),
-      earnings: Math.round(data.earnings * 100) / 100,
-      documentsCount: data.documentsCount,
-    }))
-    .sort((a, b) => a.period.localeCompare(b.period));
+  if (error) {
+    throw new AppError(`Failed to fetch historical earnings: ${error.message}`, 400);
+  }
 
-  const byDistributor: DistributorEarnings[] = Object.entries(distributorEarningsMap)
-    .map(([distributorId, data]) => ({
-      distributorId,
-      distributorName: data.distributorName,
-      totalEarnings: Math.round(data.totalEarnings * 100) / 100,
-      documentsCount: data.documentsCount,
-    }))
-    .sort((a, b) => b.totalEarnings - a.totalEarnings); // Sort by earnings desc
-
-  // Calculate average period earnings (only counting periods with earnings)
-  const periodsWithEarnings = periodEarnings.filter(p => p.earnings > 0).length;
-  const averagePeriodEarnings = periodsWithEarnings > 0 ? totalEarnings / periodsWithEarnings : 0;
-
+  // Return database result directly - response structure matches interface
   return {
-    periodEarnings,
-    totalEarnings: Math.round(totalEarnings * 100) / 100,
-    averagePeriodEarnings: Math.round(averagePeriodEarnings * 100) / 100,
-    totalDocuments,
-    byDistributor,
+    periodEarnings: data.periodEarnings || [],
+    totalEarnings: data.totalEarnings || 0,
+    averagePeriodEarnings: data.averagePeriodEarnings || 0,
+    totalDocuments: data.totalDocuments || 0,
+    byDistributor: data.byDistributor || [],
     period: {
       startDate: startDateStr,
       endDate: endDateStr,
