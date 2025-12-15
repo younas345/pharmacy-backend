@@ -229,3 +229,222 @@ export const getDashboardSummary = async (pharmacyId: string): Promise<Dashboard
   };
 };
 
+// Interface for period earnings data point (monthly or yearly)
+export interface PeriodEarnings {
+  period: string; // Format: "YYYY-MM" for monthly, "YYYY" for yearly
+  label: string; // Human-readable label (e.g., "December 2025" or "2025")
+  earnings: number;
+  documentsCount: number;
+}
+
+// Interface for earnings by distributor
+export interface DistributorEarnings {
+  distributorId: string;
+  distributorName: string;
+  totalEarnings: number;
+  documentsCount: number;
+}
+
+// Interface for historical earnings response
+export interface HistoricalEarningsResponse {
+  periodEarnings: PeriodEarnings[];
+  totalEarnings: number;
+  averagePeriodEarnings: number;
+  totalDocuments: number;
+  byDistributor: DistributorEarnings[];
+  period: {
+    startDate: string;
+    endDate: string;
+    type: 'monthly' | 'yearly';
+    periods: number;
+  };
+}
+
+/**
+ * Get historical earnings for a pharmacy grouped by month or year
+ * Data comes from uploaded_documents.total_credit_amount grouped by report_date
+ */
+export const getHistoricalEarnings = async (
+  pharmacyId: string,
+  periodType: 'monthly' | 'yearly' = 'monthly',
+  periods: number = 12
+): Promise<HistoricalEarningsResponse> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  // Calculate date range based on period type
+  const endDate = new Date();
+  const startDate = new Date();
+  
+  if (periodType === 'yearly') {
+    // Go back N years from today
+    startDate.setFullYear(startDate.getFullYear() - periods);
+    startDate.setMonth(0, 1); // Start of first month (January 1st)
+    startDate.setHours(0, 0, 0, 0);
+  } else {
+    // monthly: Go back N months from today
+    startDate.setMonth(startDate.getMonth() - periods);
+    startDate.setDate(1); // Start of first month
+    startDate.setHours(0, 0, 0, 0);
+  }
+  
+  // End date is today (inclusive)
+  endDate.setHours(23, 59, 59, 999);
+
+  const startDateStr = startDate.toISOString().split('T')[0];
+  const endDateStr = endDate.toISOString().split('T')[0];
+
+  console.log(`📊 Fetching historical earnings for pharmacy ${pharmacyId} from ${startDateStr} to ${endDateStr} (${periodType}, ${periods} periods)`);
+
+  // Fetch documents with earnings data within the date range
+  const { data: documents, error: docsError } = await db
+    .from('uploaded_documents')
+    .select(`
+      id,
+      report_date,
+      total_credit_amount,
+      reverse_distributor_id,
+      reverse_distributors (
+        id,
+        name
+      )
+    `)
+    .eq('pharmacy_id', pharmacyId)
+    .gte('report_date', startDateStr)
+    .lte('report_date', endDateStr)
+    .not('total_credit_amount', 'is', null)
+    .order('report_date', { ascending: true });
+
+  if (docsError) {
+    throw new AppError(`Failed to fetch documents: ${docsError.message}`, 400);
+  }
+
+  // Initialize period earnings map
+  const periodEarningsMap: Record<string, { earnings: number; documentsCount: number }> = {};
+  
+  // Helper function to get period key from date
+  const getPeriodKey = (dateStr: string): string => {
+    const date = new Date(dateStr);
+    if (periodType === 'yearly') {
+      return date.getFullYear().toString();
+    } else {
+      // monthly: YYYY-MM
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      return `${year}-${month}`;
+    }
+  };
+
+  // Helper function to get period label
+  const getPeriodLabel = (periodKey: string): string => {
+    if (periodType === 'yearly') {
+      return periodKey;
+    } else {
+      // monthly: Convert "YYYY-MM" to "Month YYYY"
+      const [year, month] = periodKey.split('-');
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+      return `${monthNames[parseInt(month) - 1]} ${year}`;
+    }
+  };
+
+  // Fill in all periods in the range
+  const currentPeriod = new Date(startDate);
+  while (currentPeriod <= endDate) {
+    const periodKey = getPeriodKey(currentPeriod.toISOString().split('T')[0]);
+    if (!periodEarningsMap[periodKey]) {
+      periodEarningsMap[periodKey] = { earnings: 0, documentsCount: 0 };
+    }
+    
+    if (periodType === 'yearly') {
+      currentPeriod.setFullYear(currentPeriod.getFullYear() + 1);
+    } else {
+      currentPeriod.setMonth(currentPeriod.getMonth() + 1);
+    }
+  }
+
+  // Group earnings by distributor
+  const distributorEarningsMap: Record<string, { 
+    distributorName: string; 
+    totalEarnings: number; 
+    documentsCount: number 
+  }> = {};
+
+  // Process documents
+  let totalEarnings = 0;
+  let totalDocuments = 0;
+
+  (documents || []).forEach((doc: any) => {
+    const reportDate = doc.report_date;
+    const creditAmount = Number(doc.total_credit_amount) || 0;
+
+    if (reportDate) {
+      const periodKey = getPeriodKey(reportDate);
+      if (periodEarningsMap[periodKey]) {
+        periodEarningsMap[periodKey].earnings += creditAmount;
+        periodEarningsMap[periodKey].documentsCount += 1;
+        totalEarnings += creditAmount;
+        totalDocuments += 1;
+      }
+    }
+
+    // Track by distributor
+    const distributorId = doc.reverse_distributor_id;
+    const distributorName = doc.reverse_distributors?.name || 'Unknown Distributor';
+    
+    if (distributorId) {
+      if (!distributorEarningsMap[distributorId]) {
+        distributorEarningsMap[distributorId] = {
+          distributorName,
+          totalEarnings: 0,
+          documentsCount: 0,
+        };
+      }
+      distributorEarningsMap[distributorId].totalEarnings += creditAmount;
+      distributorEarningsMap[distributorId].documentsCount += 1;
+    }
+  });
+
+  // Convert maps to arrays
+  const periodEarnings: PeriodEarnings[] = Object.entries(periodEarningsMap)
+    .map(([period, data]) => ({
+      period,
+      label: getPeriodLabel(period),
+      earnings: Math.round(data.earnings * 100) / 100,
+      documentsCount: data.documentsCount,
+    }))
+    .sort((a, b) => a.period.localeCompare(b.period));
+
+  const byDistributor: DistributorEarnings[] = Object.entries(distributorEarningsMap)
+    .map(([distributorId, data]) => ({
+      distributorId,
+      distributorName: data.distributorName,
+      totalEarnings: Math.round(data.totalEarnings * 100) / 100,
+      documentsCount: data.documentsCount,
+    }))
+    .sort((a, b) => b.totalEarnings - a.totalEarnings); // Sort by earnings desc
+
+  // Calculate average period earnings (only counting periods with earnings)
+  const periodsWithEarnings = periodEarnings.filter(p => p.earnings > 0).length;
+  const averagePeriodEarnings = periodsWithEarnings > 0 ? totalEarnings / periodsWithEarnings : 0;
+
+  return {
+    periodEarnings,
+    totalEarnings: Math.round(totalEarnings * 100) / 100,
+    averagePeriodEarnings: Math.round(averagePeriodEarnings * 100) / 100,
+    totalDocuments,
+    byDistributor,
+    period: {
+      startDate: startDateStr,
+      endDate: endDateStr,
+      type: periodType,
+      periods,
+    },
+  };
+};
+
