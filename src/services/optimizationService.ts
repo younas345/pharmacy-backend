@@ -4073,21 +4073,24 @@ export const getPackageSuggestionsByNdcs = async (
   }
 
   // Step 9: Check if packages have already been created with these distributors
+  // IMPORTANT: Only consider packages that are NOT delivered (status = false)
+  // If a package is delivered (status = true), it should not count as "alreadyCreated"
   console.log(`📦 Checking existing custom packages for pharmacy ${pharmacyId}...`);
   const existingDistributorNames = new Set<string>();
 
   if (distributorNames.length > 0) {
     const { data: existingPackages, error: existingError } = await db
       .from('custom_packages')
-      .select('id, distributor_name, distributor_id')
+      .select('id, distributor_name, distributor_id, status')
       .eq('pharmacy_id', pharmacyId)
+      .eq('status', false) // Only consider non-delivered packages
       .in('distributor_name', distributorNames);
 
     if (!existingError && existingPackages) {
       existingPackages.forEach((pkg: any) => {
         existingDistributorNames.add(pkg.distributor_name);
       });
-      console.log(`📦 Found ${existingPackages.length} existing packages with matching distributors`);
+      console.log(`📦 Found ${existingPackages.length} existing non-delivered packages with matching distributors`);
     }
   }
 

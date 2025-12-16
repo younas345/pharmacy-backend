@@ -133,7 +133,7 @@ router.get('/packages/by-ndc', getPackageRecommendationsByNdcsHandler);
  * /api/optimization/packages/suggestions:
  *   post:
  *     summary: Get package suggestions by NDC codes with alreadyCreated flag
- *     description: Analyzes provided NDC codes with full/partial units and groups them by distributor based on best prices. Also checks if a package has already been created with each distributor for the pharmacy. Returns alreadyCreated boolean for each package suggestion.
+ *     description: Analyzes provided NDC codes with full/partial units and groups them by distributor based on best prices. Also checks if a non-delivered package has already been created with each distributor for the pharmacy. Returns alreadyCreated boolean for each package suggestion. Delivered packages (status=true) are not counted as already created.
  *     tags: [Optimization]
  *     security:
  *       - bearerAuth: []
@@ -270,7 +270,7 @@ router.get('/packages/by-ndc', getPackageRecommendationsByNdcsHandler);
  *                             type: number
  *                           alreadyCreated:
  *                             type: boolean
- *                             description: Whether a package has already been created with this distributor for the pharmacy
+ *                             description: Whether a non-delivered package has already been created with this distributor for the pharmacy. Delivered packages (status=true) are not counted.
  *                             example: false
  *                     totalProducts:
  *                       type: number
@@ -295,7 +295,7 @@ router.get('/packages/by-ndc', getPackageRecommendationsByNdcsHandler);
  *                           type: number
  *                         packagesAlreadyCreated:
  *                           type: number
- *                           description: Number of packages that already exist with the suggested distributors
+ *                           description: Number of non-delivered packages that already exist with the suggested distributors
  *       401:
  *         description: Unauthorized - invalid or missing token
  *         content:
