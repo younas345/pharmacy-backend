@@ -36,6 +36,11 @@ export interface ReverseDistributorInfo {
   };
   portalUrl?: string; // Portal/website URL
   supportedFormats?: string[]; // Supported file formats (e.g., ["PDF", "CSV"])
+  serviceFee?: {
+    percentage?: number; // Service fee percentage (e.g., 13.4 for 13.4%)
+    paymentPeriodDays?: number; // Payment period in days (e.g., 30, 60, 90)
+  };
+  reportDate?: string; // Report date from the document (YYYY-MM-DD format) - used for fee rate tracking
 }
 
 export interface ReturnReportData {
@@ -454,7 +459,11 @@ Return data in this EXACT structure:
       "country": null
     },
     "portalUrl": null,
-    "supportedFormats": null
+    "supportedFormats": null,
+    "serviceFee": {
+      "percentage": null,
+      "paymentPeriodDays": null
+    }
   },
   "pharmacy": null,
   "reportDate": null,
@@ -486,6 +495,31 @@ EXTRACTION RULES:
 4. Calculate pricePerUnit = creditAmount / quantity if needed
 5. Convert dates to YYYY-MM-DD format
 6. NDC format: XXXXX-XXXX-XX
+
+7. *** SERVICE FEE EXTRACTION - CRITICAL ***
+   Look for the ACTUAL service fee/rate information in the document (NOT examples):
+   
+   EXTRACT FROM text like:
+   - "Base service rate: X%. You elected to have your check issued within Y days from the above date."
+   - This is typically near the top of the document, describing YOUR actual terms
+   
+   Pattern to extract:
+   - "Base service rate: X%" → extract X as percentage (e.g., 9.4, 13.4, 15.0)
+   - "elected to have your check issued within Y days" → extract Y as paymentPeriodDays (30, 60, or 90)
+   
+   *** DO NOT EXTRACT FROM EXAMPLES ***
+   IGNORE any text that contains:
+   - "Example of how the program works"
+   - "for demonstration purposes"
+   - "used for demonstration purposes only"
+   - "Here's how it works" followed by example calculations
+   - Text that shows hypothetical scenarios like "$10,000 of product"
+   
+   The REAL rate is typically stated clearly near the beginning:
+   "Base service rate: 9.4%. You elected to have your check issued within 90 days from the above date."
+   → percentage: 9.4, paymentPeriodDays: 90
+   
+   If you can't find the actual rate (only examples), set both to null
 
 7. *** CRITICAL - FULL AND PARTIAL EXTRACTION ***
    
@@ -744,6 +778,21 @@ export const mergeChunkResults = (chunkResults: Array<Partial<ReturnReportData>>
         }
         if (chunkInfo.supportedFormats && (!info.supportedFormats || chunkInfo.supportedFormats.length > info.supportedFormats.length)) {
           info.supportedFormats = chunkInfo.supportedFormats;
+        }
+        
+        // Merge serviceFee - prefer non-null values
+        if (chunkInfo.serviceFee) {
+          if (!info.serviceFee) {
+            info.serviceFee = { ...chunkInfo.serviceFee };
+          } else {
+            // Merge individual fields, prefer non-null values
+            if (chunkInfo.serviceFee.percentage !== null && chunkInfo.serviceFee.percentage !== undefined) {
+              info.serviceFee.percentage = chunkInfo.serviceFee.percentage;
+            }
+            if (chunkInfo.serviceFee.paymentPeriodDays !== null && chunkInfo.serviceFee.paymentPeriodDays !== undefined) {
+              info.serviceFee.paymentPeriodDays = chunkInfo.serviceFee.paymentPeriodDays;
+            }
+          }
         }
         
         // Merge address - prefer more complete addresses
@@ -1007,6 +1056,31 @@ DISTRIBUTOR INFORMATION - EXTRACT EVERYTHING YOU CAN FIND:
    - Look for mentions of file formats: "PDF", "CSV", "Excel", "XML", "EDI"
    - Common phrases: "Accepts:", "Formats:", "File types:", "We accept"
 
+7. SERVICE FEE INFORMATION (CRITICAL - EXTRACT ACTUAL RATE ONLY):
+   
+   Look for YOUR ACTUAL service fee rate, typically stated as:
+   "Base service rate: X%. You elected to have your check issued within Y days from the above date."
+   
+   This is usually near the top of the document, NOT in example sections.
+   
+   Extract:
+   - "Base service rate: X%" → percentage (e.g., 9.4, 13.4, 15.0)
+   - "elected to have your check issued within Y days" → paymentPeriodDays (30, 60, or 90)
+   
+   *** IMPORTANT: DO NOT EXTRACT FROM EXAMPLES ***
+   IGNORE any text containing:
+   - "Example of how the program works"
+   - "for demonstration purposes"
+   - "used for demonstration purposes only"  
+   - "Here's how it works" followed by hypothetical calculations
+   - Scenarios showing "$10,000 of product" or similar hypothetical amounts
+   
+   REAL example to extract:
+   "Base service rate: 9.4%. You elected to have your check issued within 90 days from the above date."
+   → serviceFee: { percentage: 9.4, paymentPeriodDays: 90 }
+   
+   If only example rates are found (no actual rate), set both fields to null
+
 ═══════════════════════════════════════════════════════════════
 PRODUCT/ITEM INFORMATION - EXTRACT FOR EACH ITEM:
 ═══════════════════════════════════════════════════════════════
@@ -1129,7 +1203,11 @@ CRITICAL EXTRACTION RULES:
       "country": "USA" or null
     } or null,
     "portalUrl": "https://portal.example.com" or null,
-    "supportedFormats": ["PDF", "CSV"] or null
+    "supportedFormats": ["PDF", "CSV"] or null,
+    "serviceFee": {
+      "percentage": 13.4 or null,
+      "paymentPeriodDays": 30 or null
+    } or null
   },
   "pharmacy": "Pharmacy Name" or null,
   "reportDate": "YYYY-MM-DD",
@@ -1156,11 +1234,6 @@ CRITICAL EXTRACTION RULES:
 
 IMPORTANT: Always extract both "full" and "partial" as numbers for each item.
 Even if the value is 0, you must include it in the JSON.
-    }
-  ],
-  "totalCreditAmount": 125.50,
-  "totalItems": 1
-}
 
 ═══════════════════════════════════════════════════════════════
 CRITICAL JSON FORMATTING - THIS IS MANDATORY:
@@ -1247,6 +1320,13 @@ REMEMBER: Extract ALL distributor information from headers, footers, and contact
       console.log('   Address:', jsonData.reverseDistributorInfo.address || 'Not found');
       console.log('   Portal URL:', jsonData.reverseDistributorInfo.portalUrl || 'Not found');
       console.log('   Supported Formats:', jsonData.reverseDistributorInfo.supportedFormats || 'Not found');
+      if (jsonData.reverseDistributorInfo.serviceFee) {
+        console.log('   💰 Service Fee:');
+        console.log('      Percentage:', jsonData.reverseDistributorInfo.serviceFee.percentage !== null && jsonData.reverseDistributorInfo.serviceFee.percentage !== undefined ? `${jsonData.reverseDistributorInfo.serviceFee.percentage}%` : 'Not found');
+        console.log('      Payment Period:', jsonData.reverseDistributorInfo.serviceFee.paymentPeriodDays !== null && jsonData.reverseDistributorInfo.serviceFee.paymentPeriodDays !== undefined ? `${jsonData.reverseDistributorInfo.serviceFee.paymentPeriodDays} days` : 'Not found');
+      } else {
+        console.log('   💰 Service Fee: Not found');
+      }
     } else if (jsonData.reverseDistributor) {
       console.log('📋 Extracted Distributor Name only:', jsonData.reverseDistributor);
       console.log('⚠️ No detailed distributor info extracted');

@@ -5,6 +5,7 @@ import {
   getCustomPackageByIdHandler,
   deleteCustomPackageHandler,
   updatePackageStatusHandler,
+  addItemsToPackageHandler,
 } from '../controllers/customPackagesController';
 
 const router = Router();
@@ -299,6 +300,117 @@ router.delete('/:id', deleteCustomPackageHandler);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.patch('/:id/mark-status', updatePackageStatusHandler);
+
+/**
+ * @swagger
+ * /api/optimization/custom-packages/{id}/add-items:
+ *   patch:
+ *     summary: Add items to an existing custom package
+ *     description: |
+ *       Adds new items to an existing custom package. Only non-delivered packages (status = false) can be updated.
+ *       Each item is treated separately even if NDC is same as existing items.
+ *     tags: [Optimization]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Package ID
+ *         example: "123e4567-e89b-12d3-a456-426614174000"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - items
+ *             properties:
+ *               items:
+ *                 type: array
+ *                 description: Array of items to add to the package
+ *                 minItems: 1
+ *                 items:
+ *                   $ref: '#/components/schemas/CustomPackageItem'
+ *           examples:
+ *             addSingleItem:
+ *               summary: Add single item
+ *               value:
+ *                 items:
+ *                   - ndc: "59746017110"
+ *                     productId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *                     productName: "prednisone 1 MG Oral Tablet"
+ *                     full: 0
+ *                     partial: 5
+ *                     pricePerUnit: 35.42
+ *                     totalValue: 177.10
+ *             addMultipleItems:
+ *               summary: Add multiple items
+ *               value:
+ *                 items:
+ *                   - ndc: "59746017110"
+ *                     productName: "prednisone 1 MG Oral Tablet"
+ *                     full: 2
+ *                     partial: 0
+ *                     pricePerUnit: 35.42
+ *                     totalValue: 70.84
+ *                   - ndc: "00187-5115-60"
+ *                     productName: "Aspirin 100mg"
+ *                     full: 1
+ *                     partial: 0
+ *                     pricePerUnit: 50.00
+ *                     totalValue: 50.00
+ *     responses:
+ *       200:
+ *         description: Items added to package successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   $ref: '#/components/schemas/CustomPackage'
+ *                 message:
+ *                   type: string
+ *                   example: "2 item(s) added to package successfully"
+ *       400:
+ *         description: Bad request - validation error, package is delivered, or missing required fields
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               packageDelivered:
+ *                 summary: Package already delivered
+ *                 value:
+ *                   status: "error"
+ *                   message: "Cannot add items to a delivered package. Only non-delivered packages can be updated."
+ *               emptyItems:
+ *                 summary: Empty items array
+ *                 value:
+ *                   status: "error"
+ *                   message: "Items array is required and cannot be empty"
+ *       404:
+ *         description: Package not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.patch('/:id/add-items', addItemsToPackageHandler);
 
 export default router;
 

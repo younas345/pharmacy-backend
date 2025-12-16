@@ -47,6 +47,11 @@ export const processReturnReportHandler = catchAsync(
         const distributorInfo = structuredData.reverseDistributorInfo || 
           (structuredData.reverseDistributor ? { name: structuredData.reverseDistributor } : undefined);
         
+        // Add report date to distributor info for fee rate tracking
+        if (distributorInfo && structuredData.reportDate) {
+          distributorInfo.reportDate = structuredData.reportDate;
+        }
+        
         // Log what we're about to save
         if (distributorInfo) {
           console.log('📦 Distributor Info to Save:');
@@ -56,6 +61,12 @@ export const processReturnReportHandler = catchAsync(
           console.log('   Address:', distributorInfo.address ? JSON.stringify(distributorInfo.address) : 'Not provided');
           console.log('   Portal URL:', distributorInfo.portalUrl || 'Not provided');
           console.log('   Supported Formats:', distributorInfo.supportedFormats || 'Not provided');
+          if (distributorInfo.serviceFee) {
+            console.log('   💰 Service Fee:');
+            console.log('      Percentage:', distributorInfo.serviceFee.percentage !== null && distributorInfo.serviceFee.percentage !== undefined ? `${distributorInfo.serviceFee.percentage}%` : 'Not provided');
+            console.log('      Payment Period:', distributorInfo.serviceFee.paymentPeriodDays !== null && distributorInfo.serviceFee.paymentPeriodDays !== undefined ? `${distributorInfo.serviceFee.paymentPeriodDays} days` : 'Not provided');
+          }
+          console.log('   Report Date:', distributorInfo.reportDate || 'Not provided');
         }
         
         distributorId = await findOrCreateReverseDistributor(distributorName, distributorInfo);

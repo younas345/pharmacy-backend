@@ -5,6 +5,7 @@ import {
   getCustomPackageById,
   deleteCustomPackage,
   updatePackageStatus,
+  addItemsToCustomPackage,
   CreateCustomPackageRequest,
 } from '../services/customPackagesService';
 import { catchAsync } from '../utils/catchAsync';
@@ -154,6 +155,36 @@ export const updatePackageStatusHandler = catchAsync(
       status: 'success',
       data: updatedPackage,
       message,
+    });
+  }
+);
+
+// Add items to an existing custom package
+export const addItemsToPackageHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId;
+    const packageId = req.params.id;
+
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
+    if (!packageId) {
+      throw new AppError('Package ID is required', 400);
+    }
+
+    const { items } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      throw new AppError('Items array is required and cannot be empty', 400);
+    }
+
+    const updatedPackage = await addItemsToCustomPackage(pharmacyId, packageId, { items });
+
+    res.status(200).json({
+      status: 'success',
+      data: updatedPackage,
+      message: `${items.length} item(s) added to package successfully`,
     });
   }
 );
