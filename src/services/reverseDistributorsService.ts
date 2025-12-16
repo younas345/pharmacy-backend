@@ -1,6 +1,15 @@
 import { supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
 
+export interface FeeRate {
+  percentage: number;
+  reportDate: string; // YYYY-MM-DD format
+}
+
+export interface FeeRates {
+  [paymentPeriodDays: string]: FeeRate; // Key is the payment period in days (e.g., "30", "60", "90")
+}
+
 export interface ReverseDistributor {
   id: string;
   name: string;
@@ -10,6 +19,7 @@ export interface ReverseDistributor {
   address?: any;
   portal_url?: string;
   supported_formats?: string[];
+  fee_rates?: FeeRates;
   is_active: boolean;
   created_at: string;
 }
@@ -28,6 +38,11 @@ export interface ReverseDistributorInfo {
   };
   portalUrl?: string;
   supportedFormats?: string[];
+  serviceFee?: {
+    percentage?: number; // Service fee percentage (e.g., 13.4 for 13.4%)
+    paymentPeriodDays?: number; // Payment period in days (e.g., 30, 60, 90)
+  };
+  reportDate?: string; // Report date from the document (YYYY-MM-DD format)
 }
 
 /**
@@ -109,6 +124,54 @@ export const findOrCreateReverseDistributor = async (
         console.log('   📄 Will update supported formats:', distributorInfo.supportedFormats);
       }
       
+      // Handle fee rates update
+      if (distributorInfo.serviceFee && 
+          distributorInfo.serviceFee.percentage !== null && 
+          distributorInfo.serviceFee.percentage !== undefined &&
+          distributorInfo.serviceFee.paymentPeriodDays !== null && 
+          distributorInfo.serviceFee.paymentPeriodDays !== undefined &&
+          distributorInfo.reportDate) {
+        
+        const periodKey = String(distributorInfo.serviceFee.paymentPeriodDays);
+        const newPercentage = distributorInfo.serviceFee.percentage;
+        const newReportDate = distributorInfo.reportDate;
+        
+        console.log(`   💰 Processing fee rate: ${newPercentage}% for ${periodKey} days period (report date: ${newReportDate})`);
+        
+        // Get existing fee_rates
+        const existingFeeRates: FeeRates = existing.fee_rates || {};
+        const existingRateForPeriod = existingFeeRates[periodKey];
+        
+        let shouldUpdateFeeRate = false;
+        
+        if (!existingRateForPeriod) {
+          // No existing rate for this period, add it
+          console.log(`      📝 No existing rate for ${periodKey} days, adding new rate`);
+          shouldUpdateFeeRate = true;
+        } else {
+          // Compare report dates
+          const existingReportDate = existingRateForPeriod.reportDate;
+          console.log(`      📝 Existing rate for ${periodKey} days: ${existingRateForPeriod.percentage}% (report date: ${existingReportDate})`);
+          
+          if (newReportDate > existingReportDate) {
+            // New report date is more recent, update the rate
+            console.log(`      📝 New report date (${newReportDate}) is more recent than existing (${existingReportDate}), updating rate`);
+            shouldUpdateFeeRate = true;
+          } else {
+            console.log(`      ℹ️ Existing report date (${existingReportDate}) is same or more recent, keeping existing rate`);
+          }
+        }
+        
+        if (shouldUpdateFeeRate) {
+          existingFeeRates[periodKey] = {
+            percentage: newPercentage,
+            reportDate: newReportDate,
+          };
+          updateData.fee_rates = existingFeeRates;
+          console.log(`      ✅ Fee rate will be updated: ${periodKey} days → ${newPercentage}%`);
+        }
+      }
+      
       // Always update if there's any new information provided
       if (Object.keys(updateData).length > 0) {
         console.log('💾 Updating existing distributor with fields:', Object.keys(updateData));
@@ -164,6 +227,25 @@ export const findOrCreateReverseDistributor = async (
     if (distributorInfo.supportedFormats) {
       insertData.supported_formats = distributorInfo.supportedFormats;
       console.log('   📄 Adding supported formats:', distributorInfo.supportedFormats);
+    }
+    
+    // Add fee rates if provided
+    if (distributorInfo.serviceFee && 
+        distributorInfo.serviceFee.percentage !== null && 
+        distributorInfo.serviceFee.percentage !== undefined &&
+        distributorInfo.serviceFee.paymentPeriodDays !== null && 
+        distributorInfo.serviceFee.paymentPeriodDays !== undefined &&
+        distributorInfo.reportDate) {
+      
+      const periodKey = String(distributorInfo.serviceFee.paymentPeriodDays);
+      const feeRates: FeeRates = {
+        [periodKey]: {
+          percentage: distributorInfo.serviceFee.percentage,
+          reportDate: distributorInfo.reportDate,
+        },
+      };
+      insertData.fee_rates = feeRates;
+      console.log(`   💰 Adding fee rate: ${distributorInfo.serviceFee.percentage}% for ${periodKey} days period (report date: ${distributorInfo.reportDate})`);
     }
   }
   
