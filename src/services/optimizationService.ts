@@ -1692,6 +1692,7 @@ export const getOptimizationRecommendations = async (
 // Package Recommendation Interfaces
 export interface PackageProduct {
   ndc: string;
+  productId?: string; // Product ID from product_list_items
   productName: string;
   full: number;
   partial: number;
@@ -2088,6 +2089,7 @@ export const getPackageRecommendations = async (
   });
 
   // Step 6: Group products by distributor
+  // IMPORTANT: Do NOT merge products with same NDC - treat each item separately
   const distributorPackagesMap: Record<string, PackageProduct[]> = {};
 
   productItems.forEach((productItem) => {
@@ -2110,8 +2112,10 @@ export const getPackageRecommendations = async (
       distributorPackagesMap[distributorInfo.distributorName] = [];
     }
 
+    // Add productId (item id from product_list_items) - treat each item separately
     distributorPackagesMap[distributorInfo.distributorName].push({
       ndc,
+      productId: productItem.id, // Include product_list_items id
       productName: productItem.product_name || `Product ${ndc}`,
       full: fullUnits,
       partial: partialUnits,
@@ -2185,6 +2189,7 @@ export const getPackageRecommendations = async (
   );
 
   // Step 9: Fetch existing custom packages and decrement quantities
+  // IMPORTANT: Now using productId (item id) instead of NDC for matching
   console.log(`📦 Fetching existing custom packages for pharmacy ${pharmacyId}...`);
   const { data: existingPackages, error: existingPackagesError } = await db
     .from('custom_packages')
@@ -2195,50 +2200,57 @@ export const getPackageRecommendations = async (
     console.warn(`⚠️ Failed to fetch existing packages: ${existingPackagesError.message}`);
   }
 
-  // Build a map of NDC -> total quantity already in packages
-  const ndcToExistingQuantityMap: Record<string, number> = {};
+  // Build a map of productId -> total quantity already in packages
+  // Each item is tracked by its unique product_id, not by NDC
+  const productIdToExistingQuantityMap: Record<string, number> = {};
   
   if (existingPackages && existingPackages.length > 0) {
     const packageIds = existingPackages.map((pkg: any) => pkg.id);
     
     const { data: existingPackageItems, error: itemsError } = await db
       .from('custom_package_items')
-      .select('ndc, full, partial')
+      .select('id, ndc, product_id, full, partial')
       .in('package_id', packageIds);
 
     if (!itemsError && existingPackageItems) {
       existingPackageItems.forEach((item: any) => {
-        const ndc = String(item.ndc).trim();
-        // Sum full + partial as total quantity
+        // Use product_id as the key for matching (each item is unique)
+        const productId = item.product_id;
+        if (!productId) {
+          return; // Skip items without product_id
+        }
+        
+        // Sum full + partial as total quantity for this specific item
         const quantity = (Number(item.full) || 0) + (Number(item.partial) || 0);
         
-        // Normalize NDC (remove dashes) for matching
-        // This ensures we match NDCs regardless of dash format (e.g., "12345-678-90" = "1234567890")
-        const normalizedNdc = ndc.replace(/-/g, '').trim();
-        
-        // Add to map (sum quantities if same NDC appears multiple times)
-        // Use normalized NDC as key for consistent matching
-        if (!ndcToExistingQuantityMap[normalizedNdc]) {
-          ndcToExistingQuantityMap[normalizedNdc] = 0;
+        // Add to map (each productId should be unique, but sum just in case)
+        if (!productIdToExistingQuantityMap[productId]) {
+          productIdToExistingQuantityMap[productId] = 0;
         }
-        ndcToExistingQuantityMap[normalizedNdc] += quantity;
+        productIdToExistingQuantityMap[productId] += quantity;
       });
       
       console.log(`📦 Found ${existingPackageItems.length} items in existing packages`);
-      console.log(`📊 Total unique NDCs already in packages: ${Object.keys(ndcToExistingQuantityMap).length}`);
-      if (Object.keys(ndcToExistingQuantityMap).length > 0) {
-        console.log(`📊 Quantities by NDC:`, Object.entries(ndcToExistingQuantityMap).map(([ndc, qty]) => `${ndc}: ${qty}`).join(', '));
+      console.log(`📊 Total unique productIds already in packages: ${Object.keys(productIdToExistingQuantityMap).length}`);
+      if (Object.keys(productIdToExistingQuantityMap).length > 0) {
+        console.log(`📊 Quantities by productId:`, Object.entries(productIdToExistingQuantityMap).map(([id, qty]) => `${id}: ${qty}`).join(', '));
       }
     }
   }
 
   // Step 10: Decrement quantities from suggestions and remove products with total units <= 0
+  // Uses productId for matching instead of NDC
   packages.forEach((pkg) => {
     pkg.products = pkg.products
       .map((product) => {
-        // Normalize NDC for matching (both stored and product NDCs are normalized)
-        const normalizedProductNdc = String(product.ndc).replace(/-/g, '').trim();
-        const existingQuantity = ndcToExistingQuantityMap[normalizedProductNdc] || 0;
+        // Use productId for matching - each item is tracked uniquely
+        const productId = product.productId;
+        if (!productId) {
+          // If no productId, keep the product as-is (no decrement)
+          return product;
+        }
+        
+        const existingQuantity = productIdToExistingQuantityMap[productId] || 0;
         
         // Calculate total units and decrement
         const originalTotal = product.full + product.partial;
@@ -2246,7 +2258,7 @@ export const getPackageRecommendations = async (
         
         if (newTotal <= 0) {
           // Remove product if total units is 0 or negative
-          console.log(`   ❌ Removing product ${product.ndc} from ${pkg.distributorName} - total would be ${newTotal} (existing: ${existingQuantity}, suggested: ${originalTotal})`);
+          console.log(`   ❌ Removing product ${product.ndc} (id: ${productId}) from ${pkg.distributorName} - total would be ${newTotal} (existing: ${existingQuantity}, suggested: ${originalTotal})`);
           return null;
         }
         
@@ -2281,7 +2293,7 @@ export const getPackageRecommendations = async (
         };
         
         if (existingQuantity > 0) {
-          console.log(`   ✅ Updated product ${product.ndc} in ${pkg.distributorName}: ${originalTotal} → ${newTotal} (decremented ${existingQuantity})`);
+          console.log(`   ✅ Updated product ${product.ndc} (id: ${productId}) in ${pkg.distributorName}: ${originalTotal} → ${newTotal} (decremented ${existingQuantity})`);
         }
         return updatedProduct;
       })
@@ -3645,6 +3657,481 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     totalDistributors: distributorsArray.length,
     totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
     generatedAt: new Date().toISOString(),
+  };
+};
+
+// Interface for package suggestion with alreadyCreated flag
+export interface PackageSuggestionWithStatus extends DistributorPackage {
+  alreadyCreated: boolean;
+}
+
+// Interface for package suggestions response
+export interface PackageSuggestionsResponse {
+  packages: PackageSuggestionWithStatus[];
+  totalProducts: number;
+  totalPackages: number;
+  totalEstimatedValue: number;
+  generatedAt: string;
+  summary: {
+    productsWithPricing: number;
+    productsWithoutPricing: number;
+    distributorsUsed: number;
+    packagesAlreadyCreated: number;
+  };
+}
+
+// Interface for NDC input item
+export interface NdcInputItem {
+  ndc: string;
+  productId?: string; // Product ID from product_list_items (optional)
+  productName?: string; // Product name (optional)
+  full?: number;
+  partial?: number;
+}
+
+/**
+ * Get package suggestions by NDC codes with alreadyCreated flag
+ * Checks if a package has already been created with each distributor for the pharmacy
+ */
+export const getPackageSuggestionsByNdcs = async (
+  pharmacyId: string,
+  items: NdcInputItem[]
+): Promise<PackageSuggestionsResponse> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  if (!items || items.length === 0) {
+    return {
+      packages: [],
+      totalProducts: 0,
+      totalPackages: 0,
+      totalEstimatedValue: 0,
+      generatedAt: new Date().toISOString(),
+      summary: {
+        productsWithPricing: 0,
+        productsWithoutPricing: 0,
+        distributorsUsed: 0,
+        packagesAlreadyCreated: 0,
+      },
+    };
+  }
+
+  // Step 1: Normalize items - DO NOT deduplicate, treat each item separately
+  const normalizedItems = items.map((item) => ({
+    ndc: String(item.ndc).trim(),
+    normalizedNdc: String(item.ndc).replace(/-/g, '').trim(),
+    productId: item.productId || null,
+    productName: item.productName || null,
+    full: item.full || 0,
+    partial: item.partial || 0,
+  })).filter((item) => item.ndc.length > 0);
+
+  if (normalizedItems.length === 0) {
+    return {
+      packages: [],
+      totalProducts: 0,
+      totalPackages: 0,
+      totalEstimatedValue: 0,
+      generatedAt: new Date().toISOString(),
+      summary: {
+        productsWithPricing: 0,
+        productsWithoutPricing: 0,
+        distributorsUsed: 0,
+        packagesAlreadyCreated: 0,
+      },
+    };
+  }
+
+  const ndcs = normalizedItems.map((item) => item.ndc);
+
+  // Step 2: Get product information from products table
+  const { data: products, error: productsError } = await db
+    .from('products')
+    .select('ndc, product_name')
+    .in('ndc', ndcs);
+
+  // Create a map of NDC to product name
+  const ndcToProductNameMap: Record<string, string> = {};
+  if (!productsError && products) {
+    products.forEach((product) => {
+      ndcToProductNameMap[product.ndc] = product.product_name;
+    });
+  }
+
+  // Step 3: Build unit type map for each NDC
+  const ndcUnitTypeMap: Map<string, { needsFullPrice: boolean; needsPartialPrice: boolean }> = new Map();
+  normalizedItems.forEach((item) => {
+    const needsFullPrice = item.full > 0;
+    const needsPartialPrice = item.partial > 0;
+    ndcUnitTypeMap.set(item.normalizedNdc, { needsFullPrice, needsPartialPrice });
+  });
+
+  // Step 4: Fetch ALL return reports using pagination
+  console.log(`📊 getPackageSuggestionsByNdcs: Fetching ALL return_reports using pagination...`);
+  const selectFields = `
+    id,
+    data,
+    document_id,
+    created_at,
+    uploaded_documents (
+      reverse_distributor_id,
+      report_date,
+      uploaded_at,
+      reverse_distributors (
+        id,
+        name
+      )
+    )
+  `;
+
+  const returnReports: any[] = [];
+  const batchSize = 1000;
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const batchQuery = db
+      .from('return_reports')
+      .select(selectFields)
+      .range(offset, offset + batchSize - 1);
+
+    const { data: batch, error: batchError } = await batchQuery;
+
+    if (batchError) {
+      throw new AppError(`Failed to fetch return reports: ${batchError.message}`, 400);
+    }
+
+    if (batch && batch.length > 0) {
+      returnReports.push(...batch);
+      offset += batchSize;
+      console.log(`   ✅ Fetched ${returnReports.length} records so far...`);
+
+      if (batch.length < batchSize) {
+        hasMore = false;
+      }
+    } else {
+      hasMore = false;
+    }
+  }
+
+  console.log(`📊 Total return_reports fetched: ${returnReports.length}`);
+
+  // Sort by report_date (latest first)
+  if (returnReports && returnReports.length > 0) {
+    returnReports.sort((a: any, b: any) => {
+      const dateA = a.uploaded_documents?.report_date || a.uploaded_documents?.uploaded_at || a.created_at;
+      const dateB = b.uploaded_documents?.report_date || b.uploaded_documents?.uploaded_at || b.created_at;
+      const dateAObj = dateA ? new Date(dateA) : new Date(0);
+      const dateBObj = dateB ? new Date(dateB) : new Date(0);
+      return dateBObj.getTime() - dateAObj.getTime();
+    });
+  }
+
+  // Step 5: Build pricing map (NDC -> Distributor -> Best Price)
+  const ndcPricingMap: Record<
+    string,
+    Array<{
+      distributorName: string;
+      pricePerUnit: number;
+      creditAmount: number;
+      quantity: number;
+    }>
+  > = {};
+
+  // Track latest price per distributor-NDC combination
+  const distributorNdcToLatestPriceMap: Record<string, number> = {};
+
+  // Initialize map for all NDCs
+  ndcs.forEach((ndc) => {
+    ndcPricingMap[ndc] = [];
+  });
+
+  // Process return reports to extract pricing
+  (returnReports || []).forEach((report: any) => {
+    const data = report.data;
+    const distributorName = (report.uploaded_documents?.reverse_distributors?.name ||
+      data?.reverseDistributor ||
+      data?.reverseDistributorInfo?.name ||
+      'Unknown Distributor').trim();
+
+    if (!distributorName || distributorName === 'Unknown Distributor') {
+      return;
+    }
+
+    let reportItems: any[] = [];
+
+    if (data && typeof data === 'object') {
+      if (Array.isArray(data.items)) {
+        reportItems = data.items;
+      } else if (data.items && typeof data.items === 'object' && !Array.isArray(data.items)) {
+        reportItems = [data.items];
+      } else if (data.ndcCode || data.ndc) {
+        reportItems = [data];
+      }
+    }
+
+    reportItems.forEach((item: any) => {
+      const ndcCode = item.ndcCode || item.ndc;
+
+      if (!ndcCode) {
+        return;
+      }
+
+      const normalizedNdcCode = String(ndcCode).replace(/-/g, '').trim();
+
+      // Find matching NDC from input list
+      const matchingItem = normalizedItems.find((n) => {
+        return (
+          n.normalizedNdc === normalizedNdcCode ||
+          String(n.ndc).trim() === String(ndcCode).trim()
+        );
+      });
+
+      if (!matchingItem) {
+        return;
+      }
+
+      const matchingNdc = matchingItem.ndc;
+
+      // Get full and partial values from return report item
+      const itemFull = Number(item.full) || 0;
+      const itemPartial = Number(item.partial) || 0;
+
+      // Filter records based on unit type requirements
+      const unitTypeReq = ndcUnitTypeMap.get(matchingItem.normalizedNdc);
+
+      if (unitTypeReq) {
+        const { needsFullPrice, needsPartialPrice } = unitTypeReq;
+
+        // If only full units requested, skip partial-only records
+        if (needsFullPrice && !needsPartialPrice) {
+          if (itemFull === 0 || itemPartial > 0) {
+            return;
+          }
+        }
+
+        // If only partial units requested, skip full-only records
+        if (needsPartialPrice && !needsFullPrice) {
+          if (itemPartial === 0 || itemFull > 0) {
+            return;
+          }
+        }
+      }
+
+      const quantity = Number(item.quantity) || 1;
+      const creditAmount = Number(item.creditAmount) || 0;
+      const pricePerUnit =
+        Number(item.pricePerUnit) || (quantity > 0 && creditAmount > 0 ? creditAmount / quantity : 0);
+
+      if (pricePerUnit > 0) {
+        const distributorNdcKey = `${distributorName}|${matchingNdc}`;
+        if (!distributorNdcToLatestPriceMap[distributorNdcKey]) {
+          distributorNdcToLatestPriceMap[distributorNdcKey] = pricePerUnit;
+        }
+
+        ndcPricingMap[matchingNdc].push({
+          distributorName,
+          pricePerUnit,
+          creditAmount,
+          quantity,
+        });
+      }
+    });
+  });
+
+  // Step 6: For each product, find the best distributor
+  const productDistributorMap: Record<
+    string,
+    {
+      distributorName: string;
+      pricePerUnit: number;
+    }
+  > = {};
+
+  normalizedItems.forEach((item) => {
+    const ndc = item.ndc;
+    const pricingData = ndcPricingMap[ndc] || [];
+
+    if (pricingData.length === 0) {
+      return;
+    }
+
+    // Group by distributor
+    const distributorPrices: Record<string, { totalPrice: number; count: number }> = {};
+
+    pricingData.forEach((pricing) => {
+      const distName = (pricing.distributorName || 'Unknown Distributor').trim();
+      if (!distributorPrices[distName]) {
+        distributorPrices[distName] = { totalPrice: 0, count: 0 };
+      }
+      distributorPrices[distName].totalPrice += pricing.pricePerUnit;
+      distributorPrices[distName].count += 1;
+    });
+
+    const distributorAverages: Array<{ name: string; price: number }> = Object.entries(
+      distributorPrices
+    )
+      .filter(([_, data]) => data.count > 0)
+      .map(([name, data]) => {
+        const distributorName = name.trim();
+        const distributorNdcKey = `${distributorName}|${ndc}`;
+        const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
+        const price = latestPrice !== undefined ? latestPrice : data.totalPrice / data.count;
+        return { name: distributorName, price };
+      });
+
+    if (distributorAverages.length === 0) {
+      return;
+    }
+
+    distributorAverages.sort((a, b) => b.price - a.price);
+
+    productDistributorMap[ndc] = {
+      distributorName: distributorAverages[0].name,
+      pricePerUnit: distributorAverages[0].price,
+    };
+  });
+
+  // Step 7: Group products by distributor
+  // IMPORTANT: Do NOT merge products with same NDC - treat each item separately
+  const distributorPackagesMap: Record<string, PackageProduct[]> = {};
+
+  normalizedItems.forEach((item) => {
+    const ndc = item.ndc;
+    const distributorInfo = productDistributorMap[ndc];
+
+    if (!distributorInfo) {
+      return;
+    }
+
+    const fullUnits = item.full;
+    const partialUnits = item.partial;
+    const totalUnits = fullUnits + partialUnits || 1;
+    const pricePerUnit = distributorInfo.pricePerUnit;
+    const totalValue = pricePerUnit * totalUnits;
+
+    if (!distributorPackagesMap[distributorInfo.distributorName]) {
+      distributorPackagesMap[distributorInfo.distributorName] = [];
+    }
+
+    // Include productId from input if available
+    // Use productName from input if provided, otherwise fallback to database
+    distributorPackagesMap[distributorInfo.distributorName].push({
+      ndc,
+      productId: item.productId || undefined,
+      productName: item.productName || ndcToProductNameMap[ndc] || `Product ${ndc}`,
+      full: fullUnits,
+      partial: partialUnits,
+      pricePerUnit,
+      totalValue,
+    });
+  });
+
+  // Step 8: Fetch distributor contact information
+  const distributorNames = Object.keys(distributorPackagesMap);
+  const distributorNameToIdMap: Record<string, string> = {};
+  const distributorContactInfoMap: Record<string, {
+    email?: string;
+    phone?: string;
+    location?: string;
+  }> = {};
+
+  if (distributorNames.length > 0) {
+    const { data: distributors, error: distError } = await db
+      .from('reverse_distributors')
+      .select('id, name, contact_email, contact_phone, address')
+      .in('name', distributorNames);
+
+    if (!distError && distributors) {
+      distributors.forEach((dist) => {
+        distributorNameToIdMap[dist.name] = dist.id;
+
+        let location: string | undefined;
+        if (dist.address) {
+          const addr = dist.address;
+          const locationParts: string[] = [];
+          if (addr.street) locationParts.push(addr.street);
+          if (addr.city) locationParts.push(addr.city);
+          if (addr.state) locationParts.push(addr.state);
+          if (addr.zipCode) locationParts.push(addr.zipCode);
+          if (addr.country) locationParts.push(addr.country);
+          if (locationParts.length > 0) {
+            location = locationParts.join(', ');
+          }
+        }
+
+        distributorContactInfoMap[dist.name] = {
+          email: dist.contact_email || undefined,
+          phone: dist.contact_phone || undefined,
+          location,
+        };
+      });
+    }
+  }
+
+  // Step 9: Check if packages have already been created with these distributors
+  console.log(`📦 Checking existing custom packages for pharmacy ${pharmacyId}...`);
+  const existingDistributorNames = new Set<string>();
+
+  if (distributorNames.length > 0) {
+    const { data: existingPackages, error: existingError } = await db
+      .from('custom_packages')
+      .select('id, distributor_name, distributor_id')
+      .eq('pharmacy_id', pharmacyId)
+      .in('distributor_name', distributorNames);
+
+    if (!existingError && existingPackages) {
+      existingPackages.forEach((pkg: any) => {
+        existingDistributorNames.add(pkg.distributor_name);
+      });
+      console.log(`📦 Found ${existingPackages.length} existing packages with matching distributors`);
+    }
+  }
+
+  // Step 10: Build package suggestions with alreadyCreated flag
+  const packages: PackageSuggestionWithStatus[] = Object.entries(distributorPackagesMap).map(
+    ([distributorName, packageProducts]) => {
+      const totalItems = packageProducts.reduce((sum, p) => sum + p.full + p.partial, 0);
+      const totalEstimatedValue = packageProducts.reduce((sum, p) => sum + p.totalValue, 0);
+      const averagePricePerUnit = totalItems > 0 ? totalEstimatedValue / totalItems : 0;
+
+      return {
+        distributorName,
+        distributorId: distributorNameToIdMap[distributorName],
+        distributorContact: distributorContactInfoMap[distributorName],
+        products: packageProducts,
+        totalItems,
+        totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
+        averagePricePerUnit: Math.round(averagePricePerUnit * 100) / 100,
+        alreadyCreated: existingDistributorNames.has(distributorName),
+      };
+    }
+  );
+
+  // Sort packages by total estimated value (highest first)
+  packages.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
+
+  // Calculate summary statistics
+  const productsWithPricing = Object.keys(productDistributorMap).length;
+  const productsWithoutPricing = normalizedItems.length - productsWithPricing;
+  const totalEstimatedValue = packages.reduce((sum, pkg) => sum + pkg.totalEstimatedValue, 0);
+  const packagesAlreadyCreated = packages.filter((pkg) => pkg.alreadyCreated).length;
+
+  return {
+    packages,
+    totalProducts: normalizedItems.length,
+    totalPackages: packages.length,
+    totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
+    generatedAt: new Date().toISOString(),
+    summary: {
+      productsWithPricing,
+      productsWithoutPricing,
+      distributorsUsed: packages.length,
+      packagesAlreadyCreated,
+    },
   };
 };
 

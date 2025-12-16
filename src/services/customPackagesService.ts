@@ -3,7 +3,10 @@ import { AppError } from '../utils/appError';
 
 // Interface for custom package item (accepts both camelCase and snake_case)
 export interface CustomPackageItem {
+  id?: string; // Item ID (returned from database)
   ndc: string;
+  productId?: string; // Product ID from product_list_items
+  product_id?: string; // Accept snake_case for backward compatibility
   productName?: string;
   product_name?: string; // Accept snake_case for backward compatibility
   full: number; // Number of full units
@@ -102,6 +105,7 @@ export const createCustomPackage = async (
 
     const normalizedItem = {
       ndc: item.ndc,
+      productId: item.productId || item.product_id || null,
       productName: item.productName || item.product_name || '',
       full: fullValue,
       partial: partialValue,
@@ -203,6 +207,7 @@ export const createCustomPackage = async (
   const packageItems = normalizedItems.map((item) => ({
     package_id: packageRecord.id,
     ndc: item.ndc,
+    product_id: item.productId || null,
     product_name: item.productName,
     full: item.full,
     partial: item.partial,
@@ -218,6 +223,28 @@ export const createCustomPackage = async (
     throw new AppError(`Failed to create package items: ${itemsError.message}`, 400);
   }
 
+  // Fetch inserted items to get their IDs
+  const { data: insertedItems, error: fetchItemsError } = await db
+    .from('custom_package_items')
+    .select('*')
+    .eq('package_id', packageRecord.id);
+
+  if (fetchItemsError) {
+    console.warn(`Warning: Could not fetch inserted items: ${fetchItemsError.message}`);
+  }
+
+  // Map items with their IDs
+  const itemsWithIds = (insertedItems || []).map((item: any) => ({
+    id: item.id,
+    ndc: item.ndc,
+    productId: item.product_id || undefined,
+    productName: item.product_name,
+    full: item.full || 0,
+    partial: item.partial || 0,
+    pricePerUnit: item.price_per_unit,
+    totalValue: item.total_value,
+  }));
+
   // Return the created package with items
   return {
     id: packageRecord.id,
@@ -226,7 +253,7 @@ export const createCustomPackage = async (
     distributorName: packageRecord.distributor_name,
     distributorId: packageRecord.distributor_id || undefined,
     distributorContact,
-    items: normalizedItems,
+    items: itemsWithIds,
     totalItems,
     totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
     notes: packageRecord.notes || undefined,
@@ -338,7 +365,9 @@ export const getCustomPackages = async (
       itemsByPackage[item.package_id] = [];
     }
     itemsByPackage[item.package_id].push({
+      id: item.id,
       ndc: item.ndc,
+      productId: item.product_id || undefined,
       productName: item.product_name,
       full: item.full || 0,
       partial: item.partial || 0,
@@ -530,7 +559,9 @@ export const getCustomPackageById = async (
     distributorId: packageRecord.distributor_id || undefined,
     distributorContact,
     items: (items || []).map((item: any) => ({
+      id: item.id,
       ndc: item.ndc,
+      productId: item.product_id || undefined,
       productName: item.product_name,
       full: item.full || 0,
       partial: item.partial || 0,
@@ -742,7 +773,9 @@ export const updatePackageStatus = async (
     distributorId: updatedPackage.distributor_id || undefined,
     distributorContact,
     items: (items || []).map((item: any) => ({
+      id: item.id,
       ndc: item.ndc,
+      productId: item.product_id || undefined,
       productName: item.product_name,
       full: item.full || 0,
       partial: item.partial || 0,

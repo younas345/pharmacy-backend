@@ -218,10 +218,24 @@ export const optimizationSchemas = {
   PackageProduct: {
     type: 'object',
     properties: {
+      id: {
+        type: 'string',
+        format: 'uuid',
+        nullable: true,
+        example: '123e4567-e89b-12d3-a456-426614174000',
+        description: 'Item ID (returned from database for created packages)',
+      },
       ndc: {
         type: 'string',
         example: '00093-2263-01',
         description: 'NDC code of the product',
+      },
+      productId: {
+        type: 'string',
+        format: 'uuid',
+        nullable: true,
+        example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        description: 'Product ID from product_list_items (used for tracking)',
       },
       productName: {
         type: 'string',

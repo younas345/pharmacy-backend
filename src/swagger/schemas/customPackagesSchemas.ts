@@ -3,10 +3,31 @@ export const customPackagesSchemas = {
     type: 'object',
     required: ['ndc', 'full', 'partial'],
     properties: {
+      id: {
+        type: 'string',
+        format: 'uuid',
+        example: '123e4567-e89b-12d3-a456-426614174000',
+        nullable: true,
+        description: 'Item ID (returned from database for fetched items)',
+      },
       ndc: {
         type: 'string',
         example: '45963-0142-05',
         description: 'NDC code of the product',
+      },
+      productId: {
+        type: 'string',
+        format: 'uuid',
+        example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        nullable: true,
+        description: 'Product ID from product_list_items (used for tracking, camelCase)',
+      },
+      product_id: {
+        type: 'string',
+        format: 'uuid',
+        example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        nullable: true,
+        description: 'Product ID from product_list_items (snake_case - alternative format)',
       },
       productName: {
         type: 'string',
@@ -55,7 +76,7 @@ export const customPackagesSchemas = {
         minimum: 0,
       },
     },
-    description: 'Package item with full and partial unit counts. At least one of full or partial must be greater than 0.',
+    description: 'Package item with full and partial unit counts. At least one of full or partial must be greater than 0. Each item is treated separately even if NDC is same.',
   },
   CreateCustomPackageRequest: {
     type: 'object',

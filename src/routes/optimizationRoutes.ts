@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getOptimizationRecommendationsHandler, getPackageRecommendationsHandler, getPackageRecommendationsByNdcsHandler, getDistributorSuggestionsHandler } from '../controllers/optimizationController';
+import { getOptimizationRecommendationsHandler, getPackageRecommendationsHandler, getPackageRecommendationsByNdcsHandler, getDistributorSuggestionsHandler, getPackageSuggestionsByNdcsHandler } from '../controllers/optimizationController';
 import customPackagesRoutes from './customPackagesRoutes';
 import { authenticate } from '../middleware/auth';
 
@@ -127,6 +127,189 @@ router.get('/packages', getPackageRecommendationsHandler);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get('/packages/by-ndc', getPackageRecommendationsByNdcsHandler);
+
+/**
+ * @swagger
+ * /api/optimization/packages/suggestions:
+ *   post:
+ *     summary: Get package suggestions by NDC codes with alreadyCreated flag
+ *     description: Analyzes provided NDC codes with full/partial units and groups them by distributor based on best prices. Also checks if a package has already been created with each distributor for the pharmacy. Returns alreadyCreated boolean for each package suggestion.
+ *     tags: [Optimization]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - items
+ *             properties:
+ *               items:
+ *                 type: array
+ *                 description: Array of NDC items with full and partial units. Each item is treated separately even if NDC is same.
+ *                 minItems: 1
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - ndc
+ *                   properties:
+ *                     ndc:
+ *                       type: string
+ *                       description: NDC code of the product
+ *                       example: "00187-5115-60"
+ *                     productId:
+ *                       type: string
+ *                       description: Product ID from product_list_items (optional, used for tracking)
+ *                       example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *                     productName:
+ *                       type: string
+ *                       description: Product name (optional, fallback to database if not provided)
+ *                       example: "Aspirin 100mg Tablet"
+ *                     full:
+ *                       type: number
+ *                       description: Number of full units
+ *                       example: 2
+ *                       minimum: 0
+ *                       default: 0
+ *                     partial:
+ *                       type: number
+ *                       description: Number of partial units
+ *                       example: 1
+ *                       minimum: 0
+ *                       default: 0
+ *           examples:
+ *             singleNdc:
+ *               summary: Single NDC with full units
+ *               value:
+ *                 items:
+ *                   - ndc: "00187-5115-60"
+ *                     productId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *                     productName: "Aspirin 100mg Tablet"
+ *                     full: 2
+ *                     partial: 0
+ *             multipleNdcs:
+ *               summary: Multiple NDCs with mixed units
+ *               value:
+ *                 items:
+ *                   - ndc: "00187-5115-60"
+ *                     productId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *                     full: 2
+ *                     partial: 1
+ *                   - ndc: "42385097801"
+ *                     productId: "b2c3d4e5-f6a7-8901-bcde-f23456789012"
+ *                     full: 1
+ *                     partial: 0
+ *     responses:
+ *       200:
+ *         description: Package suggestions retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     packages:
+ *                       type: array
+ *                       description: Array of package suggestions grouped by distributor
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           distributorName:
+ *                             type: string
+ *                             example: "Return Solutions, Inc."
+ *                           distributorId:
+ *                             type: string
+ *                             nullable: true
+ *                             example: "2da2ca2e-c3c9-4ffa-9a06-a226631a9b4f"
+ *                           distributorContact:
+ *                             type: object
+ *                             nullable: true
+ *                             properties:
+ *                               email:
+ *                                 type: string
+ *                                 nullable: true
+ *                               phone:
+ *                                 type: string
+ *                                 nullable: true
+ *                               location:
+ *                                 type: string
+ *                                 nullable: true
+ *                           products:
+ *                             type: array
+ *                             items:
+ *                               type: object
+ *                               properties:
+ *                                 ndc:
+ *                                   type: string
+ *                                 productId:
+ *                                   type: string
+ *                                   nullable: true
+ *                                   description: Product ID from product_list_items
+ *                                 productName:
+ *                                   type: string
+ *                                 full:
+ *                                   type: number
+ *                                 partial:
+ *                                   type: number
+ *                                 pricePerUnit:
+ *                                   type: number
+ *                                 totalValue:
+ *                                   type: number
+ *                           totalItems:
+ *                             type: number
+ *                           totalEstimatedValue:
+ *                             type: number
+ *                           averagePricePerUnit:
+ *                             type: number
+ *                           alreadyCreated:
+ *                             type: boolean
+ *                             description: Whether a package has already been created with this distributor for the pharmacy
+ *                             example: false
+ *                     totalProducts:
+ *                       type: number
+ *                       description: Total number of products in the request
+ *                     totalPackages:
+ *                       type: number
+ *                       description: Total number of package suggestions
+ *                     totalEstimatedValue:
+ *                       type: number
+ *                       description: Total estimated value across all packages
+ *                     generatedAt:
+ *                       type: string
+ *                       format: date-time
+ *                     summary:
+ *                       type: object
+ *                       properties:
+ *                         productsWithPricing:
+ *                           type: number
+ *                         productsWithoutPricing:
+ *                           type: number
+ *                         distributorsUsed:
+ *                           type: number
+ *                         packagesAlreadyCreated:
+ *                           type: number
+ *                           description: Number of packages that already exist with the suggested distributors
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       400:
+ *         description: Bad request - missing or invalid parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/packages/suggestions', getPackageSuggestionsByNdcsHandler);
 
 /**
  * @swagger
