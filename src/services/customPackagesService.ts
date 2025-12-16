@@ -792,3 +792,192 @@ export const updatePackageStatus = async (
   };
 };
 
+// Interface for adding items to custom package
+export interface AddItemsToPackageRequest {
+  items: CustomPackageItem[];
+}
+
+// Add items to an existing custom package
+export const addItemsToCustomPackage = async (
+  pharmacyId: string,
+  packageId: string,
+  itemsData: AddItemsToPackageRequest
+): Promise<CustomPackage> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  // Check if package exists and belongs to pharmacy
+  const { data: packageRecord, error: checkError } = await db
+    .from('custom_packages')
+    .select('*')
+    .eq('id', packageId)
+    .eq('pharmacy_id', pharmacyId)
+    .single();
+
+  if (checkError || !packageRecord) {
+    throw new AppError('Package not found or you do not have permission to update it', 404);
+  }
+
+  // Check if package is already delivered (status = true)
+  if (packageRecord.status === true) {
+    throw new AppError('Cannot add items to a delivered package. Only non-delivered packages can be updated.', 400);
+  }
+
+  // Validate items
+  if (!itemsData.items || itemsData.items.length === 0) {
+    throw new AppError('At least one item is required', 400);
+  }
+
+  // Validate and normalize new items
+  const normalizedNewItems = itemsData.items.map((item: any) => {
+    const fullValue = typeof item.full === 'number' ? item.full : 0;
+    const partialValue = typeof item.partial === 'number' ? item.partial : 0;
+
+    const normalizedItem = {
+      ndc: item.ndc,
+      productId: item.productId || item.product_id || null,
+      productName: item.productName || item.product_name || '',
+      full: fullValue,
+      partial: partialValue,
+      pricePerUnit: item.pricePerUnit || item.price_per_unit || 0,
+      totalValue: item.totalValue || item.total_value || 0,
+    };
+
+    // Validate required fields
+    if (!normalizedItem.ndc) {
+      throw new AppError('NDC is required for all items', 400);
+    }
+    if (!normalizedItem.productName) {
+      throw new AppError('Product name is required for all items', 400);
+    }
+    if (normalizedItem.full < 0) {
+      throw new AppError('Full units cannot be negative', 400);
+    }
+    if (normalizedItem.partial < 0) {
+      throw new AppError('Partial units cannot be negative', 400);
+    }
+    if (normalizedItem.full === 0 && normalizedItem.partial === 0) {
+      throw new AppError('At least one of full or partial must be greater than 0 for all items', 400);
+    }
+    if (normalizedItem.pricePerUnit < 0) {
+      throw new AppError('Price per unit must be greater than or equal to 0', 400);
+    }
+    if (normalizedItem.totalValue < 0) {
+      throw new AppError('Total value must be greater than or equal to 0', 400);
+    }
+
+    return normalizedItem;
+  });
+
+  // Insert new items
+  const newPackageItems = normalizedNewItems.map((item) => ({
+    package_id: packageId,
+    ndc: item.ndc,
+    product_id: item.productId || null,
+    product_name: item.productName,
+    full: item.full,
+    partial: item.partial,
+    price_per_unit: item.pricePerUnit,
+    total_value: item.totalValue,
+  }));
+
+  const { error: itemsError } = await db.from('custom_package_items').insert(newPackageItems);
+
+  if (itemsError) {
+    throw new AppError(`Failed to add items to package: ${itemsError.message}`, 400);
+  }
+
+  // Fetch all items for this package (existing + new)
+  const { data: allItems, error: fetchItemsError } = await db
+    .from('custom_package_items')
+    .select('*')
+    .eq('package_id', packageId);
+
+  if (fetchItemsError) {
+    throw new AppError(`Failed to fetch package items: ${fetchItemsError.message}`, 400);
+  }
+
+  // Calculate new totals
+  const totalItems = (allItems || []).reduce((sum, item: any) => sum + (item.full || 0) + (item.partial || 0), 0);
+  const totalEstimatedValue = (allItems || []).reduce((sum, item: any) => sum + (Number(item.total_value) || 0), 0);
+
+  // Update package totals
+  const { data: updatedPackage, error: updateError } = await db
+    .from('custom_packages')
+    .update({
+      total_items: totalItems,
+      total_estimated_value: totalEstimatedValue,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', packageId)
+    .eq('pharmacy_id', pharmacyId)
+    .select()
+    .single();
+
+  if (updateError) {
+    throw new AppError(`Failed to update package totals: ${updateError.message}`, 400);
+  }
+
+  // Get distributor contact info if distributor_id exists
+  let distributorContact: CustomPackage['distributorContact'] | undefined;
+  if (updatedPackage.distributor_id) {
+    const { data: distributor, error: distError } = await db
+      .from('reverse_distributors')
+      .select('id, name, contact_email, contact_phone, address')
+      .eq('id', updatedPackage.distributor_id)
+      .single();
+
+    if (!distError && distributor) {
+      let location: string | undefined;
+      if (distributor.address) {
+        const addr = distributor.address;
+        const locationParts: string[] = [];
+
+        if (addr.street) locationParts.push(addr.street);
+        if (addr.city) locationParts.push(addr.city);
+        if (addr.state) locationParts.push(addr.state);
+        if (addr.zipCode) locationParts.push(addr.zipCode);
+        if (addr.country) locationParts.push(addr.country);
+
+        if (locationParts.length > 0) {
+          location = locationParts.join(', ');
+        }
+      }
+
+      distributorContact = {
+        email: distributor.contact_email || undefined,
+        phone: distributor.contact_phone || undefined,
+        location,
+      };
+    }
+  }
+
+  return {
+    id: updatedPackage.id,
+    packageNumber: updatedPackage.package_number,
+    pharmacyId: updatedPackage.pharmacy_id,
+    distributorName: updatedPackage.distributor_name,
+    distributorId: updatedPackage.distributor_id || undefined,
+    distributorContact,
+    items: (allItems || []).map((item: any) => ({
+      id: item.id,
+      ndc: item.ndc,
+      productId: item.product_id || undefined,
+      productName: item.product_name,
+      full: item.full || 0,
+      partial: item.partial || 0,
+      pricePerUnit: item.price_per_unit,
+      totalValue: item.total_value,
+    })),
+    totalItems: updatedPackage.total_items,
+    totalEstimatedValue: Math.round(updatedPackage.total_estimated_value * 100) / 100,
+    notes: updatedPackage.notes || undefined,
+    status: updatedPackage.status,
+    createdAt: updatedPackage.created_at,
+    updatedAt: updatedPackage.updated_at,
+  };
+};
+

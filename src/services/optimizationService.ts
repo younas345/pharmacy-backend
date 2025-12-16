@@ -3660,9 +3660,19 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
   };
 };
 
+// Interface for existing package info
+export interface ExistingPackageInfo {
+  id: string;
+  packageNumber: string;
+  totalItems: number;
+  totalEstimatedValue: number;
+  createdAt: string;
+}
+
 // Interface for package suggestion with alreadyCreated flag
 export interface PackageSuggestionWithStatus extends DistributorPackage {
   alreadyCreated: boolean;
+  existingPackage?: ExistingPackageInfo; // Existing package info when alreadyCreated is true
 }
 
 // Interface for package suggestions response
@@ -4077,11 +4087,12 @@ export const getPackageSuggestionsByNdcs = async (
   // If a package is delivered (status = true), it should not count as "alreadyCreated"
   console.log(`📦 Checking existing custom packages for pharmacy ${pharmacyId}...`);
   const existingDistributorNames = new Set<string>();
+  const existingPackagesMap: Record<string, ExistingPackageInfo> = {};
 
   if (distributorNames.length > 0) {
     const { data: existingPackages, error: existingError } = await db
       .from('custom_packages')
-      .select('id, distributor_name, distributor_id, status')
+      .select('id, package_number, distributor_name, distributor_id, status, total_items, total_estimated_value, created_at')
       .eq('pharmacy_id', pharmacyId)
       .eq('status', false) // Only consider non-delivered packages
       .in('distributor_name', distributorNames);
@@ -4089,17 +4100,26 @@ export const getPackageSuggestionsByNdcs = async (
     if (!existingError && existingPackages) {
       existingPackages.forEach((pkg: any) => {
         existingDistributorNames.add(pkg.distributor_name);
+        // Store the existing package info for this distributor
+        existingPackagesMap[pkg.distributor_name] = {
+          id: pkg.id,
+          packageNumber: pkg.package_number,
+          totalItems: pkg.total_items,
+          totalEstimatedValue: pkg.total_estimated_value,
+          createdAt: pkg.created_at,
+        };
       });
       console.log(`📦 Found ${existingPackages.length} existing non-delivered packages with matching distributors`);
     }
   }
 
-  // Step 10: Build package suggestions with alreadyCreated flag
+  // Step 10: Build package suggestions with alreadyCreated flag and existing package info
   const packages: PackageSuggestionWithStatus[] = Object.entries(distributorPackagesMap).map(
     ([distributorName, packageProducts]) => {
       const totalItems = packageProducts.reduce((sum, p) => sum + p.full + p.partial, 0);
       const totalEstimatedValue = packageProducts.reduce((sum, p) => sum + p.totalValue, 0);
       const averagePricePerUnit = totalItems > 0 ? totalEstimatedValue / totalItems : 0;
+      const isAlreadyCreated = existingDistributorNames.has(distributorName);
 
       return {
         distributorName,
@@ -4109,7 +4129,8 @@ export const getPackageSuggestionsByNdcs = async (
         totalItems,
         totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
         averagePricePerUnit: Math.round(averagePricePerUnit * 100) / 100,
-        alreadyCreated: existingDistributorNames.has(distributorName),
+        alreadyCreated: isAlreadyCreated,
+        existingPackage: isAlreadyCreated ? existingPackagesMap[distributorName] : undefined,
       };
     }
   );

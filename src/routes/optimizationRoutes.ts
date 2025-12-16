@@ -272,6 +272,28 @@ router.get('/packages/by-ndc', getPackageRecommendationsByNdcsHandler);
  *                             type: boolean
  *                             description: Whether a non-delivered package has already been created with this distributor for the pharmacy. Delivered packages (status=true) are not counted.
  *                             example: false
+ *                           existingPackage:
+ *                             type: object
+ *                             nullable: true
+ *                             description: Existing package info when alreadyCreated is true
+ *                             properties:
+ *                               id:
+ *                                 type: string
+ *                                 format: uuid
+ *                                 example: "123e4567-e89b-12d3-a456-426614174000"
+ *                               packageNumber:
+ *                                 type: string
+ *                                 example: "PKG-1704123456789-1234"
+ *                               totalItems:
+ *                                 type: number
+ *                                 example: 10
+ *                               totalEstimatedValue:
+ *                                 type: number
+ *                                 example: 250.50
+ *                               createdAt:
+ *                                 type: string
+ *                                 format: date-time
+ *                                 example: "2024-01-15T10:30:00.000Z"
  *                     totalProducts:
  *                       type: number
  *                       description: Total number of products in the request
