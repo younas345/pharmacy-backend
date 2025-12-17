@@ -23,6 +23,7 @@ export interface CreateCustomPackageRequest {
   distributorId?: string;
   items: CustomPackageItem[];
   notes?: string;
+  feeRate?: number; // Fee rate percentage (e.g., 13.4 for 13.4%)
 }
 
 // Interface for delivery information
@@ -50,6 +51,9 @@ export interface CustomPackage {
   items: CustomPackageItem[];
   totalItems: number;
   totalEstimatedValue: number;
+  feeRate?: number; // Fee rate percentage (e.g., 13.4 for 13.4%)
+  feeAmount?: number; // Calculated fee amount based on fee rate
+  netEstimatedValue?: number; // Total value after fee deduction
   notes?: string;
   status: boolean;
   deliveryInfo?: PackageDeliveryInfo;
@@ -140,9 +144,24 @@ export const createCustomPackage = async (
     return normalizedItem;
   });
 
-  // Calculate totals using normalized items (full + partial)
-  const totalItems = normalizedItems.reduce((sum, item) => sum + item.full + item.partial, 0);
-  const totalEstimatedValue = normalizedItems.reduce((sum, item) => sum + item.totalValue, 0);
+  // Calculate fee rate and apply discount to individual items
+  const feeRate = packageData.feeRate || 0;
+  const discountMultiplier = feeRate > 0 ? (100 - feeRate) / 100 : 1; // e.g., 13.4% fee = 0.866 multiplier
+
+  // Apply discount to each item's total value
+  const discountedItems = normalizedItems.map(item => ({
+    ...item,
+    totalValue: Math.round(item.totalValue * discountMultiplier * 100) / 100 // Apply discount and round to 2 decimals
+  }));
+
+  // Calculate totals using discounted items
+  const totalItems = discountedItems.reduce((sum, item) => sum + item.full + item.partial, 0);
+  const totalEstimatedValue = discountedItems.reduce((sum, item) => sum + item.totalValue, 0);
+  
+  // Fee amount is the total discount applied
+  const originalTotal = normalizedItems.reduce((sum, item) => sum + item.totalValue, 0);
+  const feeAmount = originalTotal - totalEstimatedValue;
+  const netEstimatedValue = totalEstimatedValue; // Same as total since discount already applied
 
   // Generate package number
   const packageNumber = generatePackageNumber();
@@ -192,6 +211,9 @@ export const createCustomPackage = async (
       distributor_id: packageData.distributorId || null,
       total_items: totalItems,
       total_estimated_value: totalEstimatedValue,
+      fee_rate: feeRate,
+      fee_amount: Math.round(feeAmount * 100) / 100,
+      net_estimated_value: Math.round(netEstimatedValue * 100) / 100,
       notes: packageData.notes || null,
       status: false,
       created_by: userId,
@@ -203,8 +225,8 @@ export const createCustomPackage = async (
     throw new AppError(`Failed to create package: ${packageError.message}`, 400);
   }
 
-  // Create package items using normalized items
-  const packageItems = normalizedItems.map((item) => ({
+  // Create package items using discounted items
+  const packageItems = discountedItems.map((item) => ({
     package_id: packageRecord.id,
     ndc: item.ndc,
     product_id: item.productId || null,
@@ -212,7 +234,7 @@ export const createCustomPackage = async (
     full: item.full,
     partial: item.partial,
     price_per_unit: item.pricePerUnit,
-    total_value: item.totalValue,
+    total_value: item.totalValue, // This is now the discounted total value
   }));
 
   const { error: itemsError } = await db.from('custom_package_items').insert(packageItems);
@@ -256,6 +278,9 @@ export const createCustomPackage = async (
     items: itemsWithIds,
     totalItems,
     totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
+    feeRate: packageRecord.fee_rate || undefined,
+    feeAmount: packageRecord.fee_amount ? Math.round(packageRecord.fee_amount * 100) / 100 : undefined,
+    netEstimatedValue: packageRecord.net_estimated_value ? Math.round(packageRecord.net_estimated_value * 100) / 100 : undefined,
     notes: packageRecord.notes || undefined,
     status: packageRecord.status,
     createdAt: packageRecord.created_at,
@@ -401,6 +426,9 @@ export const getCustomPackages = async (
       items: itemsByPackage[pkg.id] || [],
       totalItems: pkg.total_items,
       totalEstimatedValue: pkg.total_estimated_value,
+      feeRate: pkg.fee_rate || undefined,
+      feeAmount: pkg.fee_amount ? Math.round(pkg.fee_amount * 100) / 100 : undefined,
+      netEstimatedValue: pkg.net_estimated_value ? Math.round(pkg.net_estimated_value * 100) / 100 : undefined,
       notes: pkg.notes || undefined,
       status: pkg.status,
       deliveryInfo: packageDeliveryInfo,
@@ -570,6 +598,9 @@ export const getCustomPackageById = async (
     })),
     totalItems: packageRecord.total_items,
     totalEstimatedValue: packageRecord.total_estimated_value,
+    feeRate: packageRecord.fee_rate || undefined,
+    feeAmount: packageRecord.fee_amount ? Math.round(packageRecord.fee_amount * 100) / 100 : undefined,
+    netEstimatedValue: packageRecord.net_estimated_value ? Math.round(packageRecord.net_estimated_value * 100) / 100 : undefined,
     notes: packageRecord.notes || undefined,
     status: packageRecord.status,
     deliveryInfo: packageDeliveryInfo,
@@ -784,6 +815,9 @@ export const updatePackageStatus = async (
     })),
     totalItems: updatedPackage.total_items,
     totalEstimatedValue: updatedPackage.total_estimated_value,
+    feeRate: updatedPackage.fee_rate || undefined,
+    feeAmount: updatedPackage.fee_amount ? Math.round(updatedPackage.fee_amount * 100) / 100 : undefined,
+    netEstimatedValue: updatedPackage.net_estimated_value ? Math.round(updatedPackage.net_estimated_value * 100) / 100 : undefined,
     notes: updatedPackage.notes || undefined,
     status: updatedPackage.status,
     deliveryInfo: packageDeliveryInfo,
@@ -872,8 +906,17 @@ export const addItemsToCustomPackage = async (
     return normalizedItem;
   });
 
-  // Insert new items
-  const newPackageItems = normalizedNewItems.map((item) => ({
+  // Apply existing package fee rate discount to new items
+  const existingFeeRate = Number(packageRecord.fee_rate) || 0;
+  const discountMultiplier = existingFeeRate > 0 ? (100 - existingFeeRate) / 100 : 1;
+  
+  const discountedNewItems = normalizedNewItems.map(item => ({
+    ...item,
+    totalValue: Math.round(item.totalValue * discountMultiplier * 100) / 100 // Apply discount
+  }));
+
+  // Insert new items with discounted values
+  const newPackageItems = discountedNewItems.map((item) => ({
     package_id: packageId,
     ndc: item.ndc,
     product_id: item.productId || null,
@@ -881,7 +924,7 @@ export const addItemsToCustomPackage = async (
     full: item.full,
     partial: item.partial,
     price_per_unit: item.pricePerUnit,
-    total_value: item.totalValue,
+    total_value: item.totalValue, // This is now the discounted total value
   }));
 
   const { error: itemsError } = await db.from('custom_package_items').insert(newPackageItems);
@@ -900,9 +943,14 @@ export const addItemsToCustomPackage = async (
     throw new AppError(`Failed to fetch package items: ${fetchItemsError.message}`, 400);
   }
 
-  // Calculate new totals
+  // Calculate new totals (items already have discounted values)
   const totalItems = (allItems || []).reduce((sum, item: any) => sum + (item.full || 0) + (item.partial || 0), 0);
   const totalEstimatedValue = (allItems || []).reduce((sum, item: any) => sum + (Number(item.total_value) || 0), 0);
+
+  // Calculate fee amount based on what the original total would have been (reuse existingFeeRate from above)
+  const originalTotal = existingFeeRate > 0 ? totalEstimatedValue / ((100 - existingFeeRate) / 100) : totalEstimatedValue;
+  const newFeeAmount = originalTotal - totalEstimatedValue; // Discount amount already applied
+  const newNetEstimatedValue = totalEstimatedValue; // Same as total since discount already applied
 
   // Update package totals
   const { data: updatedPackage, error: updateError } = await db
@@ -910,6 +958,8 @@ export const addItemsToCustomPackage = async (
     .update({
       total_items: totalItems,
       total_estimated_value: totalEstimatedValue,
+      fee_amount: Math.round(newFeeAmount * 100) / 100,
+      net_estimated_value: Math.round(newNetEstimatedValue * 100) / 100,
       updated_at: new Date().toISOString(),
     })
     .eq('id', packageId)
@@ -974,6 +1024,9 @@ export const addItemsToCustomPackage = async (
     })),
     totalItems: updatedPackage.total_items,
     totalEstimatedValue: Math.round(updatedPackage.total_estimated_value * 100) / 100,
+    feeRate: updatedPackage.fee_rate || undefined,
+    feeAmount: updatedPackage.fee_amount ? Math.round(updatedPackage.fee_amount * 100) / 100 : undefined,
+    netEstimatedValue: updatedPackage.net_estimated_value ? Math.round(updatedPackage.net_estimated_value * 100) / 100 : undefined,
     notes: updatedPackage.notes || undefined,
     status: updatedPackage.status,
     createdAt: updatedPackage.created_at,

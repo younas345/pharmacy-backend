@@ -299,9 +299,32 @@ export const optimizationSchemas = {
             nullable: true,
             description: 'Location/address of the distributor',
           },
+          feeRates: {
+            type: 'object',
+            nullable: true,
+            description: 'Fee rates for different payment periods (30, 60, 90 days)',
+            additionalProperties: {
+              type: 'object',
+              properties: {
+                percentage: {
+                  type: 'number',
+                  example: 13.4,
+                },
+                reportDate: {
+                  type: 'string',
+                  example: '2025-01-10',
+                },
+              },
+            },
+            example: {
+              '30': { percentage: 13.4, reportDate: '2025-01-10' },
+              '60': { percentage: 15.0, reportDate: '2025-01-10' },
+              '90': { percentage: 18.0, reportDate: '2025-01-10' },
+            },
+          },
         },
         nullable: true,
-        description: 'Contact information for the distributor',
+        description: 'Contact information for the distributor including fee rates',
       },
       products: {
         type: 'array',

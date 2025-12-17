@@ -108,6 +108,14 @@ export const customPackagesSchemas = {
         nullable: true,
         description: 'Optional notes for the package',
       },
+      feeRate: {
+        type: 'number',
+        example: 13.4,
+        nullable: true,
+        description: 'Fee rate percentage for the distributor (e.g., 13.4 for 13.4%). Used to calculate fee amount and net value.',
+        minimum: 0,
+        maximum: 100,
+      },
     },
   },
   DistributorContact: {
@@ -224,7 +232,25 @@ export const customPackagesSchemas = {
       totalEstimatedValue: {
         type: 'number',
         example: 125.00,
-        description: 'Total estimated value of the package',
+        description: 'Total estimated value of the package (before fee deduction)',
+      },
+      feeRate: {
+        type: 'number',
+        example: 13.4,
+        nullable: true,
+        description: 'Fee rate percentage applied to this package',
+      },
+      feeAmount: {
+        type: 'number',
+        example: 16.75,
+        nullable: true,
+        description: 'Calculated fee amount (totalEstimatedValue * feeRate / 100)',
+      },
+      netEstimatedValue: {
+        type: 'number',
+        example: 108.25,
+        nullable: true,
+        description: 'Net value after fee deduction (totalEstimatedValue - feeAmount)',
       },
       notes: {
         type: 'string',

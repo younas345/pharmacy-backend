@@ -6,6 +6,9 @@ create table public.custom_packages (
   distributor_id uuid null,
   total_items integer null default 0,
   total_estimated_value numeric(10, 2) null default 0,
+  fee_rate numeric(5, 2) null default 0,
+  fee_amount numeric(10, 2) null default 0,
+  net_estimated_value numeric(10, 2) null default 0,
   notes text null,
   created_by uuid null,
   created_at timestamp with time zone null default now(),
@@ -17,6 +20,11 @@ create table public.custom_packages (
   constraint custom_packages_distributor_id_fkey foreign KEY (distributor_id) references reverse_distributors (id),
   constraint custom_packages_pharmacy_id_fkey foreign KEY (pharmacy_id) references pharmacy (id) on delete CASCADE
 ) TABLESPACE pg_default;
+
+-- Migration for existing table:
+ALTER TABLE public.custom_packages ADD COLUMN IF NOT EXISTS fee_rate numeric(5, 2) null default 0;
+ALTER TABLE public.custom_packages ADD COLUMN IF NOT EXISTS fee_amount numeric(10, 2) null default 0;
+ALTER TABLE public.custom_packages ADD COLUMN IF NOT EXISTS net_estimated_value numeric(10, 2) null default 0;
 
 create index IF not exists idx_custom_packages_pharmacy_id on public.custom_packages using btree (pharmacy_id) TABLESPACE pg_default;
 
