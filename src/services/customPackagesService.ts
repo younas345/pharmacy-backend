@@ -947,8 +947,7 @@ export const addItemsToCustomPackage = async (
   const totalItems = (allItems || []).reduce((sum, item: any) => sum + (item.full || 0) + (item.partial || 0), 0);
   const totalEstimatedValue = (allItems || []).reduce((sum, item: any) => sum + (Number(item.total_value) || 0), 0);
 
-  // Calculate fee amount based on what the original total would have been
-  const existingFeeRate = Number(packageRecord.fee_rate) || 0;
+  // Calculate fee amount based on what the original total would have been (reuse existingFeeRate from above)
   const originalTotal = existingFeeRate > 0 ? totalEstimatedValue / ((100 - existingFeeRate) / 100) : totalEstimatedValue;
   const newFeeAmount = originalTotal - totalEstimatedValue; // Discount amount already applied
   const newNetEstimatedValue = totalEstimatedValue; // Same as total since discount already applied
