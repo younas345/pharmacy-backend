@@ -148,10 +148,10 @@ export const createCustomPackage = async (
   const totalItems = normalizedItems.reduce((sum, item) => sum + item.full + item.partial, 0);
   const totalEstimatedValue = normalizedItems.reduce((sum, item) => sum + item.totalValue, 0);
 
-  // Calculate fee-related values
+  // Calculate fee-related values (fee rate is applied as a discount)
   const feeRate = packageData.feeRate || 0;
-  const feeAmount = feeRate > 0 ? (totalEstimatedValue * feeRate) / 100 : 0;
-  const netEstimatedValue = totalEstimatedValue - feeAmount;
+  const feeAmount = feeRate > 0 ? (totalEstimatedValue * feeRate) / 100 : 0; // Discount amount
+  const netEstimatedValue = totalEstimatedValue - feeAmount; // Total after discount
 
   // Generate package number
   const packageNumber = generatePackageNumber();
@@ -928,10 +928,10 @@ export const addItemsToCustomPackage = async (
   const totalItems = (allItems || []).reduce((sum, item: any) => sum + (item.full || 0) + (item.partial || 0), 0);
   const totalEstimatedValue = (allItems || []).reduce((sum, item: any) => sum + (Number(item.total_value) || 0), 0);
 
-  // Recalculate fee-related values using existing fee_rate
+  // Recalculate fee-related values using existing fee_rate (applied as discount)
   const existingFeeRate = Number(packageRecord.fee_rate) || 0;
-  const newFeeAmount = existingFeeRate > 0 ? (totalEstimatedValue * existingFeeRate) / 100 : 0;
-  const newNetEstimatedValue = totalEstimatedValue - newFeeAmount;
+  const newFeeAmount = existingFeeRate > 0 ? (totalEstimatedValue * existingFeeRate) / 100 : 0; // Discount amount
+  const newNetEstimatedValue = totalEstimatedValue - newFeeAmount; // Total after discount
 
   // Update package totals
   const { data: updatedPackage, error: updateError } = await db

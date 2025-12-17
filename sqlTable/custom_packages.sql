@@ -22,9 +22,9 @@ create table public.custom_packages (
 ) TABLESPACE pg_default;
 
 -- Migration for existing table:
--- ALTER TABLE public.custom_packages ADD COLUMN IF NOT EXISTS fee_rate numeric(5, 2) null default 0;
--- ALTER TABLE public.custom_packages ADD COLUMN IF NOT EXISTS fee_amount numeric(10, 2) null default 0;
--- ALTER TABLE public.custom_packages ADD COLUMN IF NOT EXISTS net_estimated_value numeric(10, 2) null default 0;
+ALTER TABLE public.custom_packages ADD COLUMN IF NOT EXISTS fee_rate numeric(5, 2) null default 0;
+ALTER TABLE public.custom_packages ADD COLUMN IF NOT EXISTS fee_amount numeric(10, 2) null default 0;
+ALTER TABLE public.custom_packages ADD COLUMN IF NOT EXISTS net_estimated_value numeric(10, 2) null default 0;
 
 create index IF not exists idx_custom_packages_pharmacy_id on public.custom_packages using btree (pharmacy_id) TABLESPACE pg_default;
 
