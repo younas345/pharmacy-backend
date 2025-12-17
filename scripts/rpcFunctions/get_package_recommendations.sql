@@ -153,8 +153,9 @@ BEGIN
             ti.partial_units,
             ti.needs_full_price,
             ti.needs_partial_price,
-            lfp.distributor_id,
-            lfp.distributor_name,
+            -- Use COALESCE to get distributor from whichever price table matches
+            COALESCE(lfp.distributor_id, lpp.distributor_id) AS distributor_id,
+            COALESCE(lfp.distributor_name, lpp.distributor_name) AS distributor_name,
             -- Use the appropriate price based on what the inventory item needs
             CASE 
                 WHEN ti.needs_full_price THEN lfp.full_price
