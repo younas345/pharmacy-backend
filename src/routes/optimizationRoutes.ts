@@ -241,6 +241,22 @@ router.get('/packages/by-ndc', getPackageRecommendationsByNdcsHandler);
  *                               location:
  *                                 type: string
  *                                 nullable: true
+ *                               feeRates:
+ *                                 type: object
+ *                                 nullable: true
+ *                                 description: Fee rates for different payment periods (30, 60, 90 days)
+ *                                 additionalProperties:
+ *                                   type: object
+ *                                   properties:
+ *                                     percentage:
+ *                                       type: number
+ *                                       example: 13.4
+ *                                     reportDate:
+ *                                       type: string
+ *                                       example: "2025-01-10"
+ *                                 example:
+ *                                   "30": { "percentage": 13.4, "reportDate": "2025-01-10" }
+ *                                   "60": { "percentage": 15.0, "reportDate": "2025-01-10" }
  *                           products:
  *                             type: array
  *                             items:
@@ -450,6 +466,23 @@ router.post('/packages/suggestions', getPackageSuggestionsByNdcsHandler);
  *                                 type: string
  *                                 nullable: true
  *                                 example: "10635 Dutchtown Road, Knoxville, TN, 37932, USA"
+ *                           feeRates:
+ *                             type: object
+ *                             nullable: true
+ *                             description: Fee rates for different payment periods (30, 60, 90 days)
+ *                             additionalProperties:
+ *                               type: object
+ *                               properties:
+ *                                 percentage:
+ *                                   type: number
+ *                                   example: 13.4
+ *                                 reportDate:
+ *                                   type: string
+ *                                   example: "2025-01-10"
+ *                             example:
+ *                               "30": { "percentage": 13.4, "reportDate": "2025-01-10" }
+ *                               "60": { "percentage": 15.0, "reportDate": "2025-01-10" }
+ *                               "90": { "percentage": 18.0, "reportDate": "2025-01-10" }
  *                           products:
  *                             type: array
  *                             description: NDCs that this distributor accepts with full/partial pricing

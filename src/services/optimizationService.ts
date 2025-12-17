@@ -1707,6 +1707,7 @@ export interface DistributorPackage {
     email?: string;
     phone?: string;
     location?: string;
+    feeRates?: DistributorFeeRates;
   };
   products: PackageProduct[];
   totalItems: number;
@@ -3146,6 +3147,16 @@ export interface DistributorNdcProduct {
 }
 
 // Interface for distributor with their accepted NDCs
+// Interface for fee rates from reverse_distributors
+export interface FeeRateInfo {
+  percentage: number;
+  reportDate: string;
+}
+
+export interface DistributorFeeRates {
+  [periodDays: string]: FeeRateInfo;
+}
+
 export interface DistributorWithNdcs {
   distributorName: string;
   distributorId?: string;
@@ -3154,6 +3165,7 @@ export interface DistributorWithNdcs {
     phone?: string;
     location?: string;
   };
+  feeRates?: DistributorFeeRates; // Fee rates from reverse_distributors table
   products: DistributorNdcProduct[];
   totalItems: number;
   totalEstimatedValue: number;
@@ -3180,6 +3192,7 @@ export interface MultipleNdcSuggestionResponse {
 }
 
 // Get distributor suggestions for multiple NDCs with full/partial quantities (grouped by distributor)
+// Uses SQL RPC function - NO JS loops
 export const getDistributorSuggestionsByMultipleNdcs = async (
   pharmacyId: string,
   items: NdcSuggestionRequestItem[]
@@ -3192,471 +3205,54 @@ export const getDistributorSuggestionsByMultipleNdcs = async (
     throw new AppError('At least one item with NDC and full/partial units is required', 400);
   }
 
-  // Validate each item has at least one of full or partial > 0
-  for (const item of items) {
-    const total = (item.full || 0) + (item.partial || 0);
-    if (total <= 0) {
-      throw new AppError(`NDC ${item.ndc}: At least one of full or partial must be greater than 0`, 400);
-    }
-  }
-
   const db = supabaseAdmin;
 
-  // Step 1: Validate items exist in inventory (no longer checking quantity)
-  const { data: productItems, error: itemsError } = await db
-    .from('product_list_items')
-    .select('ndc, full_units, partial_units, product_name')
-    .eq('added_by', pharmacyId);
-
-  if (itemsError) {
-    throw new AppError(`Failed to fetch product list items: ${itemsError.message}`, 400);
-  }
-
-  // Validate each item exists in inventory
-  for (const item of items) {
-    const normalizedNdc = item.ndc.trim();
-    const normalizedNdcForSearch = normalizedNdc.replace(/-/g, '').trim();
-    
-    let productExists = false;
-    if (productItems && productItems.length > 0) {
-      productItems.forEach((pItem) => {
-        const itemNdc = String(pItem.ndc).trim();
-        const normalizedItemNdc = String(pItem.ndc).replace(/-/g, '').trim();
-        
-        if (
-          itemNdc === normalizedNdc ||
-          normalizedItemNdc === normalizedNdcForSearch ||
-          itemNdc === normalizedNdcForSearch ||
-          normalizedItemNdc === normalizedNdc
-        ) {
-          productExists = true;
-        }
-      });
-    }
-
-    if (!productExists) {
-      // Get product name for error
-      let productName = item.product || `Product ${normalizedNdc}`;
-      if (!item.product) {
-        const { data: product } = await db
-          .from('products')
-          .select('product_name')
-          .eq('ndc', normalizedNdc)
-          .limit(1)
-          .maybeSingle();
-
-        if (product?.product_name) {
-          productName = product.product_name;
-        } else {
-          const matchingItem = productItems?.find((pItem) => {
-            const itemNdc = String(pItem.ndc).trim();
-            const normalizedItemNdc = String(pItem.ndc).replace(/-/g, '').trim();
-            return (
-              itemNdc === normalizedNdc ||
-              normalizedItemNdc === normalizedNdcForSearch ||
-              itemNdc === normalizedNdcForSearch ||
-              normalizedItemNdc === normalizedNdc
-            );
-          });
-          if (matchingItem?.product_name) {
-            productName = matchingItem.product_name;
-          }
-        }
-      }
-
-      throw new AppError(
-        `You don't have this product in your inventory. NDC: ${normalizedNdc}, Product: ${productName}`,
-        400
-      );
-    }
-  }
-
-  // Step 2: Get all return reports from ALL distributors with pagination
-  // Join with uploaded_documents and reverse_distributors to get distributor name
-  // IMPORTANT: Do NOT filter by pharmacy_id - we want ALL distributor prices
-  // to find the best prices across all distributors
-  console.log(`🏥 getDistributorSuggestionsByMultipleNdcs: Fetching return_reports from ALL distributors (no pharmacy_id filter)`);
-
-  const BATCH_SIZE = 1000;
-  let allReturnReports: any[] = [];
-  let offset = 0;
-  let hasMoreReports = true;
-
-  while (hasMoreReports) {
-    const { data: reportsBatch, error: reportsError } = await db
-      .from('return_reports')
-      .select(`
-        id,
-        data,
-        document_id,
-        uploaded_documents!inner(
-          reverse_distributor_id,
-          report_date,
-          reverse_distributors!inner(
-            id,
-            name
-          )
-        )
-      `)
-      .order('uploaded_documents(report_date)', { ascending: false })
-      .range(offset, offset + BATCH_SIZE - 1);
-
-    if (reportsError) {
-      throw new AppError(`Failed to fetch return reports: ${reportsError.message}`, 400);
-    }
-
-    if (reportsBatch && reportsBatch.length > 0) {
-      allReturnReports = allReturnReports.concat(reportsBatch);
-      offset += BATCH_SIZE;
-      if (reportsBatch.length < BATCH_SIZE) {
-        hasMoreReports = false;
-      }
-    } else {
-      hasMoreReports = false;
-    }
-  }
-
-  const returnReports = allReturnReports;
-  console.log(`📊 Total return reports fetched: ${returnReports.length}`);
-
-  // Step 3: Build pricing map for all NDCs (NDC -> Distributor -> Pricing Data)
-  // Track FULL and PARTIAL prices separately for each distributor-NDC combination
-  const ndcDistributorFullPriceMap: Record<string, Record<string, number>> = {};  // NDC -> Distributor -> Latest Full Price
-  const ndcDistributorPartialPriceMap: Record<string, Record<string, number>> = {}; // NDC -> Distributor -> Latest Partial Price
-
-  // Initialize maps for all NDCs
-  items.forEach((item) => {
-    const normalizedNdc = item.ndc.trim();
-    ndcDistributorFullPriceMap[normalizedNdc] = {};
-    ndcDistributorPartialPriceMap[normalizedNdc] = {};
-  });
-
-  // Process return reports to extract pricing for all NDCs
-  // Since reports are sorted by report_date DESC, first matching record is the latest
-  (returnReports || []).forEach((report: any) => {
-    const data = report.data;
-    // Get distributor name from joined reverse_distributors table, fallback to data field, then Unknown
-    const distributorName = (report.uploaded_documents?.reverse_distributors?.name || 
-                           data?.reverseDistributor || 
-                           data?.reverseDistributorInfo?.name ||
-                           'Unknown Distributor').trim();
-
-    if (!distributorName || distributorName === 'Unknown Distributor') {
-      return;
-    }
-
-    let reportItems: any[] = [];
-
-    if (data && typeof data === 'object') {
-      if (Array.isArray(data.items)) {
-        reportItems = data.items;
-      } else if (data.items && typeof data.items === 'object' && !Array.isArray(data.items)) {
-        reportItems = [data.items];
-      } else if (data.ndcCode || data.ndc) {
-        reportItems = [data];
-      }
-    }
-
-    reportItems.forEach((reportItem: any) => {
-      const ndcCode = reportItem.ndcCode || reportItem.ndc;
-      if (!ndcCode) {
-        return;
-      }
-
-      const normalizedItemNdc = String(ndcCode).replace(/-/g, '').trim();
-      const itemNdc = String(ndcCode).trim();
-
-      // Find matching NDC from requested items
-      let matchingNdc: string | undefined;
-      for (const requestedItem of items) {
-        const normalizedRequestedNdc = requestedItem.ndc.trim();
-        const normalizedRequestedNdcForSearch = normalizedRequestedNdc.replace(/-/g, '').trim();
-
-        if (
-          itemNdc === normalizedRequestedNdc ||
-          normalizedItemNdc === normalizedRequestedNdcForSearch ||
-          itemNdc === normalizedRequestedNdcForSearch ||
-          normalizedItemNdc === normalizedRequestedNdc
-        ) {
-          matchingNdc = normalizedRequestedNdc;
-          break;
-        }
-      }
-
-      if (!matchingNdc) {
-        return;
-      }
-
-      // Get full and partial values from return report item
-      const itemFull = Number(reportItem.full) || 0;
-      const itemPartial = Number(reportItem.partial) || 0;
-
-      const itemQuantity = Number(reportItem.quantity) || 1;
-      const creditAmount = Number(reportItem.creditAmount) || 0;
-      const pricePerUnit =
-        Number(reportItem.pricePerUnit) || (itemQuantity > 0 && creditAmount > 0 ? creditAmount / itemQuantity : 0);
-
-      if (pricePerUnit > 0) {
-        // Track FULL and PARTIAL prices separately per distributor-NDC
-        // A record is for FULL if full > 0 and partial = 0
-        // A record is for PARTIAL if partial > 0 and full = 0
-        const isFullRecord = itemFull > 0 && itemPartial === 0;
-        const isPartialRecord = itemPartial > 0 && itemFull === 0;
-
-        // Since reports are sorted by date DESC, only store the first (latest) price we encounter
-        if (isFullRecord && !ndcDistributorFullPriceMap[matchingNdc][distributorName]) {
-          ndcDistributorFullPriceMap[matchingNdc][distributorName] = pricePerUnit;
-          console.log(`💰 FULL price for ${distributorName}|${matchingNdc}: ${pricePerUnit}`);
-        }
-
-        if (isPartialRecord && !ndcDistributorPartialPriceMap[matchingNdc][distributorName]) {
-          ndcDistributorPartialPriceMap[matchingNdc][distributorName] = pricePerUnit;
-          console.log(`💰 PARTIAL price for ${distributorName}|${matchingNdc}: ${pricePerUnit}`);
-        }
-      }
-    });
-  });
-
-  // Step 4: Build distributor pricing info for each NDC
-  // Include distributors that have at least one of full or partial price
-  const ndcDistributorPricing: Record<
-    string,
-    Array<{
-      distributorName: string;
-      fullPricePerUnit: number | null;
-      partialPricePerUnit: number | null;
-    }>
-  > = {};
-
-  items.forEach((item) => {
-    const normalizedNdc = item.ndc.trim();
-    const fullPrices = ndcDistributorFullPriceMap[normalizedNdc] || {};
-    const partialPrices = ndcDistributorPartialPriceMap[normalizedNdc] || {};
-    
-    // Get all unique distributors that have either full or partial price
-    const allDistributors = new Set([...Object.keys(fullPrices), ...Object.keys(partialPrices)]);
-    
-    const pricing: Array<{ distributorName: string; fullPricePerUnit: number | null; partialPricePerUnit: number | null }> = [];
-
-    allDistributors.forEach((distributorName) => {
-      const fullPrice = fullPrices[distributorName] || null;
-      const partialPrice = partialPrices[distributorName] || null;
-
-      // Calculate total estimated value based on what user is requesting
-      const fullValue = (item.full || 0) * (fullPrice || 0);
-      const partialValue = (item.partial || 0) * (partialPrice || 0);
-      const totalValue = fullValue + partialValue;
-
-      // Only include distributor if they have pricing for what user is requesting
-      const hasRequiredPricing = 
-        ((item.full || 0) > 0 && fullPrice !== null) ||
-        ((item.partial || 0) > 0 && partialPrice !== null);
-
-      if (hasRequiredPricing && totalValue > 0) {
-        pricing.push({
-          distributorName: distributorName.trim(),
-          fullPricePerUnit: fullPrice,
-          partialPricePerUnit: partialPrice,
-        });
-      }
-    });
-
-    // Sort by total value (highest first)
-    pricing.sort((a, b) => {
-      const aTotal = ((item.full || 0) * (a.fullPricePerUnit || 0)) + ((item.partial || 0) * (a.partialPricePerUnit || 0));
-      const bTotal = ((item.full || 0) * (b.fullPricePerUnit || 0)) + ((item.partial || 0) * (b.partialPricePerUnit || 0));
-      return bTotal - aTotal;
-    });
-
-    ndcDistributorPricing[normalizedNdc] = pricing;
-  });
-
-  // Step 5: Get product names for all NDCs
-  const ndcProductNames: Record<string, string> = {};
-  for (const item of items) {
-    const normalizedNdc = item.ndc.trim();
-    let productName: string = item.product || '';
-
-    if (!productName) {
-      const { data: product } = await db
-        .from('products')
-        .select('product_name')
-        .eq('ndc', normalizedNdc)
-        .limit(1)
-        .maybeSingle();
-
-      if (product?.product_name) {
-        productName = product.product_name;
-      } else {
-        const matchingItem = productItems?.find((pItem) => {
-          const itemNdc = String(pItem.ndc).trim();
-          const normalizedItemNdc = String(pItem.ndc).replace(/-/g, '').trim();
-          const normalizedNdcForSearch = normalizedNdc.replace(/-/g, '').trim();
-          return (
-            itemNdc === normalizedNdc ||
-            normalizedItemNdc === normalizedNdcForSearch ||
-            itemNdc === normalizedNdcForSearch ||
-            normalizedItemNdc === normalizedNdc
-          );
-        });
-        if (matchingItem?.product_name) {
-          productName = matchingItem.product_name;
-        } else {
-          productName = `Product ${normalizedNdc}`;
-        }
-      }
-    }
-
-    ndcProductNames[normalizedNdc] = productName;
-  }
-
-  // Step 6: Fetch ALL distributors from database (not just those with matching records)
-  const { data: allDistributorsFromDb, error: allDistError } = await db
-    .from('reverse_distributors')
-    .select('id, name, contact_email, contact_phone, address');
-
-  if (allDistError) {
-    console.warn(`⚠️ Failed to fetch all distributors: ${allDistError.message}`);
-  }
-
-  const allDistributorsList = allDistributorsFromDb || [];
-  console.log(`📋 Total distributors in database: ${allDistributorsList.length}`);
-
-  // Build a map for quick lookup of distributor pricing by name
-  const distributorPricingByName: Record<string, Record<string, { fullPricePerUnit: number | null; partialPricePerUnit: number | null }>> = {};
-  
-  // Initialize pricing lookup from ndcDistributorPricing
-  items.forEach((item) => {
-    const normalizedNdc = item.ndc.trim();
-    const distributorPrices = ndcDistributorPricing[normalizedNdc] || [];
-    
-    distributorPrices.forEach((dist) => {
-      const distributorName = dist.distributorName.trim();
-      if (!distributorPricingByName[distributorName]) {
-        distributorPricingByName[distributorName] = {};
-      }
-      distributorPricingByName[distributorName][normalizedNdc] = {
-        fullPricePerUnit: dist.fullPricePerUnit,
-        partialPricePerUnit: dist.partialPricePerUnit,
-      };
-    });
-  });
-
-  // Step 7: Group by distributor - include ALL distributors
-  const distributorMap: Record<string, DistributorWithNdcs> = {};
-  const ndcsWithDistributors = new Set<string>();
-
-  // Initialize all distributors from database
-  allDistributorsList.forEach((dbDist) => {
-    const distributorName = dbDist.name?.trim();
-    if (!distributorName) return;
-
-    distributorMap[distributorName] = {
-      distributorName,
-      distributorId: dbDist.id,
-      products: [],
-      totalItems: 0,
-      totalEstimatedValue: 0,
-      ndcsCount: 0,
-    };
-
-    // Format location from address
-    let location: string | undefined;
-    if (dbDist.address) {
-      const addr = dbDist.address;
-      const locationParts: string[] = [];
-
-      if (addr.street) locationParts.push(addr.street);
-      if (addr.city) locationParts.push(addr.city);
-      if (addr.state) locationParts.push(addr.state);
-      if (addr.zipCode) locationParts.push(addr.zipCode);
-      if (addr.country) locationParts.push(addr.country);
-
-      if (locationParts.length > 0) {
-        location = locationParts.join(', ');
-      }
-    }
-
-    distributorMap[distributorName].distributorContact = {
-      email: dbDist.contact_email || undefined,
-      phone: dbDist.contact_phone || undefined,
-      location,
-    };
-  });
-
-  // Add products to each distributor
-  items.forEach((item) => {
-    const normalizedNdc = item.ndc.trim();
-    const totalUnits = (item.full || 0) + (item.partial || 0);
-
-    // For each distributor, add this product (with pricing if available, null if not)
-    Object.keys(distributorMap).forEach((distributorName) => {
-      const pricing = distributorPricingByName[distributorName]?.[normalizedNdc];
-      
-      const fullPricePerUnit = pricing?.fullPricePerUnit ?? null;
-      const partialPricePerUnit = pricing?.partialPricePerUnit ?? null;
-
-      // Calculate total estimated value based on full/partial prices
-      const fullValue = (item.full || 0) * (fullPricePerUnit || 0);
-      const partialValue = (item.partial || 0) * (partialPricePerUnit || 0);
-      const totalEstimatedValue = fullValue + partialValue;
-
-      // If this distributor has pricing for this NDC, mark NDC as having a distributor
-      if (pricing && (fullPricePerUnit !== null || partialPricePerUnit !== null)) {
-        ndcsWithDistributors.add(normalizedNdc);
-      }
-
-      distributorMap[distributorName].products.push({
-        ndc: normalizedNdc,
-        productName: ndcProductNames[normalizedNdc],
-        full: item.full || 0,
-        partial: item.partial || 0,
-        fullPricePerUnit: fullPricePerUnit !== null ? Math.round(fullPricePerUnit * 100) / 100 : null,
-        partialPricePerUnit: partialPricePerUnit !== null ? Math.round(partialPricePerUnit * 100) / 100 : null,
-        totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
-      });
-
-      distributorMap[distributorName].totalItems += totalUnits;
-      distributorMap[distributorName].totalEstimatedValue += totalEstimatedValue;
-      distributorMap[distributorName].ndcsCount += 1;
-    });
-  });
-
-  // Step 8: Build distributors array and calculate totals
-  const distributorsArray: DistributorWithNdcs[] = Object.values(distributorMap).map((dist) => ({
-    ...dist,
-    totalEstimatedValue: Math.round(dist.totalEstimatedValue * 100) / 100,
+  // Prepare items for RPC call
+  const itemsJson = items.map(item => ({
+    ndc: item.ndc.trim(),
+    product: item.product || null,
+    full: item.full || 0,
+    partial: item.partial || 0,
   }));
 
-  // Sort by total estimated value (highest first)
-  distributorsArray.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
-
-  // Step 9: Find NDCs without any distributors with pricing data
-  const ndcsWithoutDistributors: NdcWithoutDistributor[] = [];
-  items.forEach((item) => {
-    const normalizedNdc = item.ndc.trim();
-    if (!ndcsWithDistributors.has(normalizedNdc)) {
-      ndcsWithoutDistributors.push({
-        ndc: normalizedNdc,
-        productName: ndcProductNames[normalizedNdc],
-        full: item.full || 0,
-        partial: item.partial || 0,
-        reason: 'No distributor found offering returns for this NDC',
-      });
-    }
+  console.log('🚀 Calling get_distributor_suggestions RPC function...');
+  
+  const { data: rpcResult, error: rpcError } = await db.rpc('get_distributor_suggestions', {
+    p_pharmacy_id: pharmacyId,
+    p_items: itemsJson,
   });
 
-  // Calculate total estimated value and total items
-  const totalEstimatedValue = distributorsArray.reduce((sum, dist) => sum + dist.totalEstimatedValue, 0);
-  const totalItems = items.reduce((sum, item) => sum + (item.full || 0) + (item.partial || 0), 0);
+  if (rpcError) {
+    console.error('❌ RPC Error:', rpcError.message);
+    
+    // Check for specific error types
+    if (rpcError.message?.includes("don't have this product")) {
+      throw new AppError(rpcError.message, 400);
+    }
+    if (rpcError.message?.includes('At least one of full or partial must be greater than 0')) {
+      throw new AppError(rpcError.message, 400);
+    }
+    if (rpcError.message?.includes('At least one item')) {
+      throw new AppError(rpcError.message, 400);
+    }
+    
+    throw new AppError(`Failed to get distributor suggestions: ${rpcError.message}`, 500);
+  }
 
+  if (!rpcResult) {
+    throw new AppError('No data returned from distributor suggestions', 500);
+  }
+
+  console.log('✅ RPC function executed successfully');
+  
+  // Return the result directly - all processing done in SQL
   return {
-    distributors: distributorsArray,
-    ndcsWithoutDistributors,
-    totalItems,
-    totalDistributors: distributorsArray.length,
-    totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
-    generatedAt: new Date().toISOString(),
+    distributors: rpcResult.distributors || [],
+    ndcsWithoutDistributors: rpcResult.ndcsWithoutDistributors || [],
+    totalItems: rpcResult.totalItems || 0,
+    totalDistributors: rpcResult.totalDistributors || 0,
+    totalEstimatedValue: rpcResult.totalEstimatedValue || 0,
+    generatedAt: rpcResult.generatedAt || new Date().toISOString(),
   };
 };
 
@@ -4047,12 +3643,13 @@ export const getPackageSuggestionsByNdcs = async (
     email?: string;
     phone?: string;
     location?: string;
+    feeRates?: DistributorFeeRates;
   }> = {};
 
   if (distributorNames.length > 0) {
     const { data: distributors, error: distError } = await db
       .from('reverse_distributors')
-      .select('id, name, contact_email, contact_phone, address')
+      .select('id, name, contact_email, contact_phone, address, fee_rates')
       .in('name', distributorNames);
 
     if (!distError && distributors) {
@@ -4077,6 +3674,7 @@ export const getPackageSuggestionsByNdcs = async (
           email: dist.contact_email || undefined,
           phone: dist.contact_phone || undefined,
           location,
+          feeRates: (dist.fee_rates && typeof dist.fee_rates === 'object') ? dist.fee_rates as DistributorFeeRates : undefined,
         };
       });
     }
