@@ -123,31 +123,27 @@ BEGIN
     CREATE TEMP TABLE temp_all_prices AS
     WITH report_items AS (
         -- Extract items from return_reports JSONB data
+        -- NOTE: Each row in return_reports has data as a single item object
         SELECT 
             rd.id AS distributor_id,
             rd.name AS distributor_name,
             ud.report_date,
-            REPLACE(COALESCE(elem->>'ndcCode', elem->>'ndc', ''), '-', '') AS normalized_ndc,
-            COALESCE((elem->>'full')::INTEGER, 0) AS item_full,
-            COALESCE((elem->>'partial')::INTEGER, 0) AS item_partial,
+            -- data column IS the item directly (not data->'items')
+            REPLACE(COALESCE(rr.data->>'ndcCode', rr.data->>'ndc', ''), '-', '') AS normalized_ndc,
+            COALESCE((rr.data->>'full')::INTEGER, 0) AS item_full,
+            COALESCE((rr.data->>'partial')::INTEGER, 0) AS item_partial,
             COALESCE(
-                (elem->>'pricePerUnit')::NUMERIC,
+                (rr.data->>'pricePerUnit')::NUMERIC,
                 CASE 
-                    WHEN COALESCE((elem->>'quantity')::INTEGER, 1) > 0 
-                    THEN COALESCE((elem->>'creditAmount')::NUMERIC, 0) / GREATEST(COALESCE((elem->>'quantity')::INTEGER, 1), 1)
+                    WHEN COALESCE((rr.data->>'quantity')::INTEGER, 1) > 0 
+                    THEN COALESCE((rr.data->>'creditAmount')::NUMERIC, 0) / GREATEST(COALESCE((rr.data->>'quantity')::INTEGER, 1), 1)
                     ELSE 0 
                 END
             ) AS price_per_unit
         FROM return_reports rr
         JOIN uploaded_documents ud ON rr.document_id = ud.id
         JOIN reverse_distributors rd ON ud.reverse_distributor_id = rd.id
-        CROSS JOIN LATERAL jsonb_array_elements(
-            CASE 
-                WHEN jsonb_typeof(rr.data->'items') = 'array' THEN rr.data->'items'
-                ELSE '[]'::JSONB
-            END
-        ) AS elem
-        WHERE COALESCE(elem->>'ndcCode', elem->>'ndc') IS NOT NULL
+        WHERE COALESCE(rr.data->>'ndcCode', rr.data->>'ndc') IS NOT NULL
     )
     SELECT 
         ri.distributor_id,
