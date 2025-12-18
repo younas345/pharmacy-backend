@@ -37,6 +37,8 @@ const allowedOrigins = [
   'http://127.0.0.1:3001',
   'https://pharmacy-ui-75vl.vercel.app', // Without trailing slash
   'https://pharmacy-ui-75vl.vercel.app/', // With trailing slash (for safety)
+  'https://pharm-admin.vercel.app',
+  'https://pharm-admin.vercel.app/',
   process.env.FRONTEND_URL,
 ].filter(Boolean) as string[];
 
