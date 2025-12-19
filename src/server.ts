@@ -31,12 +31,13 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS Configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
+  'http://localhost:3002',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
+  'http://127.0.0.1:3002',
   'https://pharmacy-ui-75vl.vercel.app', // Without trailing slash
   'https://pharmacy-ui-75vl.vercel.app/', // With trailing slash (for safety)
   'https://pharm-admin.vercel.app',
