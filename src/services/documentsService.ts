@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
+import { verifyPharmacyStatus } from '../middleware/auth';
 
 export interface UploadedDocument {
   id: string;
@@ -164,6 +165,9 @@ export const uploadFileToStorage = async (
     throw new AppError('Supabase admin client not configured', 500);
   }
 
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(input.pharmacyId);
+
   const storage = supabaseAdmin.storage;
   const bucketName = 'documents'; // Storage bucket name
 
@@ -197,21 +201,10 @@ export const createDocument = async (input: CreateDocumentInput): Promise<Upload
     throw new AppError('Supabase admin client not configured', 500);
   }
 
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(input.pharmacy_id);
+
   const db = supabaseAdmin;
-
-  // Validate pharmacy_id exists before creating document
-  const { data: pharmacy, error: pharmacyError } = await db
-    .from('pharmacy')
-    .select('id')
-    .eq('id', input.pharmacy_id)
-    .single();
-
-  if (pharmacyError || !pharmacy) {
-    throw new AppError(
-      `Pharmacy with ID ${input.pharmacy_id} does not exist. Please provide a valid pharmacy_id.`,
-      400
-    );
-  }
 
   const documentData = {
     pharmacy_id: input.pharmacy_id,

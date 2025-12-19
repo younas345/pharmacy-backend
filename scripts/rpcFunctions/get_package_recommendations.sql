@@ -23,6 +23,11 @@ DECLARE
     v_total_products INTEGER := 0;
 BEGIN
     -- =====================================================
+    -- SECURITY: Check pharmacy status (block suspended/blacklisted)
+    -- =====================================================
+    PERFORM check_pharmacy_status(p_pharmacy_id);
+    
+    -- =====================================================
     -- STEP 1: Get all product_list_items for this pharmacy
     -- =====================================================
     

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
+import { verifyPharmacyStatus } from '../middleware/auth';
 
 export interface InventoryItem {
   id: string;
@@ -60,6 +61,9 @@ export const createInventoryItem = async (input: CreateInventoryItemInput): Prom
     throw new AppError('Supabase admin client not configured', 500);
   }
 
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(input.pharmacy_id);
+
   const db = supabaseAdmin;
 
   const daysUntilExpiration = calculateDaysUntilExpiration(input.expiration_date);
@@ -103,6 +107,9 @@ export const getInventoryItems = async (
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
+
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(pharmacyId);
 
   const db = supabaseAdmin;
 
@@ -150,6 +157,9 @@ export const getInventoryItemById = async (
     throw new AppError('Supabase admin client not configured', 500);
   }
 
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(pharmacyId);
+
   const db = supabaseAdmin;
 
   const { data, error } = await db
@@ -174,6 +184,9 @@ export const updateInventoryItem = async (
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
+
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(pharmacyId);
 
   const db = supabaseAdmin;
 
@@ -213,6 +226,9 @@ export const deleteInventoryItem = async (pharmacyId: string, itemId: string): P
     throw new AppError('Supabase admin client not configured', 500);
   }
 
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(pharmacyId);
+
   const db = supabaseAdmin;
 
   const { error } = await db
@@ -230,6 +246,9 @@ export const getInventoryMetrics = async (pharmacyId: string) => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
+
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(pharmacyId);
 
   const db = supabaseAdmin;
 

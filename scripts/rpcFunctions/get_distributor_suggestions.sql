@@ -27,6 +27,11 @@ DECLARE
     v_missing_product_name TEXT;
 BEGIN
     -- =====================================================
+    -- SECURITY: Check pharmacy status (block suspended/blacklisted)
+    -- =====================================================
+    PERFORM check_pharmacy_status(p_pharmacy_id);
+    
+    -- =====================================================
     -- STEP 1: Basic Validation
     -- =====================================================
     

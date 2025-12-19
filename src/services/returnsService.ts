@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
+import { verifyPharmacyStatus } from '../middleware/auth';
 
 export interface ReturnItem {
   id: string;
@@ -47,6 +48,9 @@ export const createReturn = async (input: CreateReturnInput): Promise<Return> =>
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
+
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(input.pharmacy_id);
 
   const db = supabaseAdmin;
 
@@ -114,6 +118,9 @@ export const getReturns = async (
     throw new AppError('Supabase admin client not configured', 500);
   }
 
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(pharmacyId);
+
   const db = supabaseAdmin;
 
   let query = db
@@ -166,6 +173,9 @@ export const getReturnById = async (pharmacyId: string, returnId: string): Promi
     throw new AppError('Supabase admin client not configured', 500);
   }
 
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(pharmacyId);
+
   const db = supabaseAdmin;
 
   const { data, error } = await db
@@ -199,6 +209,9 @@ export const updateReturn = async (
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
+
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(pharmacyId);
 
   const db = supabaseAdmin;
 
@@ -238,6 +251,9 @@ export const deleteReturn = async (pharmacyId: string, returnId: string): Promis
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
+
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(pharmacyId);
 
   const db = supabaseAdmin;
 
