@@ -22,8 +22,21 @@ export const getPharmaciesHandler = async (
     const pageNum = parseInt(page as string, 10) || 1;
     const limitNum = Math.min(parseInt(limit as string, 10) || 20, 100); // Max 100
 
+    // Normalize search parameter: trim whitespace, decode URL encoding, and collapse multiple spaces
+    let normalizedSearch: string | undefined = undefined;
+    if (search && typeof search === 'string') {
+      // Decode URL encoding (e.g., %20 -> space, %09 -> tab)
+      const decoded = decodeURIComponent(search);
+      // Trim leading/trailing whitespace and collapse multiple spaces/tabs into single space
+      normalizedSearch = decoded.trim().replace(/\s+/g, ' ');
+      // Set to undefined if empty after normalization
+      if (normalizedSearch === '') {
+        normalizedSearch = undefined;
+      }
+    }
+
     const result = await getPharmaciesList(
-      search as string | undefined,
+      normalizedSearch,
       status as string,
       pageNum,
       limitNum

@@ -112,7 +112,19 @@ DECLARE
     v_pharmacies JSONB;
     v_total_count INTEGER;
     v_offset INTEGER;
+    v_normalized_search TEXT;
 BEGIN
+    -- Normalize search parameter: trim whitespace and handle empty strings
+    IF p_search IS NOT NULL THEN
+        v_normalized_search := TRIM(p_search);
+        -- Set to NULL if empty after trimming
+        IF v_normalized_search = '' THEN
+            v_normalized_search := NULL;
+        END IF;
+    ELSE
+        v_normalized_search := NULL;
+    END IF;
+    
     -- Calculate offset
     v_offset := (p_page - 1) * p_limit;
     
@@ -125,12 +137,11 @@ BEGIN
         (p_status = 'all' OR p.status = p_status)
         -- Search filter (business name, owner name, email, or id)
         AND (
-            p_search IS NULL 
-            OR p_search = ''
-            OR LOWER(p.pharmacy_name) LIKE LOWER('%' || p_search || '%')
-            OR LOWER(p.name) LIKE LOWER('%' || p_search || '%')
-            OR LOWER(p.email) LIKE LOWER('%' || p_search || '%')
-            OR CAST(p.id AS TEXT) LIKE LOWER('%' || p_search || '%')
+            v_normalized_search IS NULL 
+            OR LOWER(p.pharmacy_name) LIKE LOWER('%' || v_normalized_search || '%')
+            OR LOWER(p.name) LIKE LOWER('%' || v_normalized_search || '%')
+            OR LOWER(p.email) LIKE LOWER('%' || v_normalized_search || '%')
+            OR CAST(p.id AS TEXT) LIKE LOWER('%' || v_normalized_search || '%')
         );
     
     -- Get pharmacies with all required fields
@@ -156,12 +167,11 @@ BEGIN
             (p_status = 'all' OR p.status = p_status)
             -- Search filter
             AND (
-                p_search IS NULL 
-                OR p_search = ''
-                OR LOWER(p.pharmacy_name) LIKE LOWER('%' || p_search || '%')
-                OR LOWER(p.name) LIKE LOWER('%' || p_search || '%')
-                OR LOWER(p.email) LIKE LOWER('%' || p_search || '%')
-                OR CAST(p.id AS TEXT) LIKE LOWER('%' || p_search || '%')
+                v_normalized_search IS NULL 
+                OR LOWER(p.pharmacy_name) LIKE LOWER('%' || v_normalized_search || '%')
+                OR LOWER(p.name) LIKE LOWER('%' || v_normalized_search || '%')
+                OR LOWER(p.email) LIKE LOWER('%' || v_normalized_search || '%')
+                OR CAST(p.id AS TEXT) LIKE LOWER('%' || v_normalized_search || '%')
             )
         ORDER BY p.created_at DESC
         LIMIT p_limit
@@ -197,7 +207,7 @@ BEGIN
             'totalPages', CEIL(v_total_count::NUMERIC / p_limit::NUMERIC)::INTEGER
         ),
         'filters', jsonb_build_object(
-            'search', p_search,
+            'search', v_normalized_search,
             'status', p_status
         ),
         'generatedAt', NOW()
