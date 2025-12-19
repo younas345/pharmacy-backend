@@ -250,7 +250,7 @@ router.get('/:id', getPharmacyByIdHandler);
  *     summary: Update pharmacy details
  *     description: |
  *       Updates pharmacy information. Only the provided fields will be updated.
- *       Can update business name, owner, email, phone, address, city, state, zipCode, and licenseNumber.
+ *       Supports all pharmacy fields including license information, addresses, and subscription details.
  *     tags: [Admin - Pharmacies]
  *     security:
  *       - bearerAuth: []
@@ -304,8 +304,67 @@ router.get('/:id', getPharmacyByIdHandler);
  *                 example: "10001"
  *               licenseNumber:
  *                 type: string
- *                 description: License/NPI number
+ *                 description: Legacy license field (maps to stateLicenseNumber)
  *                 example: "NY-12345"
+ *               stateLicenseNumber:
+ *                 type: string
+ *                 description: State pharmacy license number
+ *                 example: "NY-12345"
+ *               licenseExpiryDate:
+ *                 type: string
+ *                 format: date
+ *                 description: License expiration date (YYYY-MM-DD)
+ *                 example: "2025-12-31"
+ *               npiNumber:
+ *                 type: string
+ *                 description: National Provider Identifier
+ *                 example: "1234567890"
+ *               deaNumber:
+ *                 type: string
+ *                 description: DEA registration number
+ *                 example: "AB1234567"
+ *               physicalAddress:
+ *                 type: object
+ *                 description: Physical address (JSONB format)
+ *                 properties:
+ *                   street:
+ *                     type: string
+ *                     example: "123 Main St, Suite 100"
+ *                   city:
+ *                     type: string
+ *                     example: "New York"
+ *                   state:
+ *                     type: string
+ *                     example: "NY"
+ *                   zip:
+ *                     type: string
+ *                     example: "10001"
+ *               billingAddress:
+ *                 type: object
+ *                 description: Billing address (JSONB format)
+ *                 properties:
+ *                   street:
+ *                     type: string
+ *                     example: "123 Main St, Suite 100"
+ *                   city:
+ *                     type: string
+ *                     example: "New York"
+ *                   state:
+ *                     type: string
+ *                     example: "NY"
+ *                   zip:
+ *                     type: string
+ *                     example: "10001"
+ *               subscriptionTier:
+ *                 type: string
+ *                 enum: [free, basic, premium, enterprise]
+ *                 description: Subscription tier
+ *                 example: "premium"
+ *               subscriptionStatus:
+ *                 type: string
+ *                 enum: [active, trial, expired, cancelled, past_due]
+ *                 description: Subscription status
+ *                 example: "active"
  *     responses:
  *       200:
  *         description: Pharmacy updated successfully

@@ -299,6 +299,7 @@ DECLARE
     v_result JSONB;
     v_exists BOOLEAN;
     v_physical_address JSONB;
+    v_billing_address JSONB;
 BEGIN
     -- Check if pharmacy exists
     SELECT EXISTS(SELECT 1 FROM pharmacy WHERE id = p_pharmacy_id)
@@ -312,24 +313,36 @@ BEGIN
         );
     END IF;
     
-    -- Get current physical_address
-    SELECT COALESCE(physical_address, '{}'::JSONB)
-    INTO v_physical_address
+    -- Get current addresses
+    SELECT 
+        COALESCE(physical_address, '{}'::JSONB),
+        COALESCE(billing_address, '{}'::JSONB)
+    INTO v_physical_address, v_billing_address
     FROM pharmacy
     WHERE id = p_pharmacy_id;
     
-    -- Build updated physical_address from individual fields
-    IF p_updates ? 'address' THEN
-        v_physical_address := v_physical_address || jsonb_build_object('street', p_updates->>'address');
+    -- Handle physicalAddress object (direct JSONB update)
+    IF p_updates ? 'physicalAddress' THEN
+        v_physical_address := p_updates->'physicalAddress';
+    ELSE
+        -- Build updated physical_address from individual fields (backward compatibility)
+        IF p_updates ? 'address' THEN
+            v_physical_address := v_physical_address || jsonb_build_object('street', p_updates->>'address');
+        END IF;
+        IF p_updates ? 'city' THEN
+            v_physical_address := v_physical_address || jsonb_build_object('city', p_updates->>'city');
+        END IF;
+        IF p_updates ? 'state' THEN
+            v_physical_address := v_physical_address || jsonb_build_object('state', p_updates->>'state');
+        END IF;
+        IF p_updates ? 'zipCode' THEN
+            v_physical_address := v_physical_address || jsonb_build_object('zip', p_updates->>'zipCode');
+        END IF;
     END IF;
-    IF p_updates ? 'city' THEN
-        v_physical_address := v_physical_address || jsonb_build_object('city', p_updates->>'city');
-    END IF;
-    IF p_updates ? 'state' THEN
-        v_physical_address := v_physical_address || jsonb_build_object('state', p_updates->>'state');
-    END IF;
-    IF p_updates ? 'zipCode' THEN
-        v_physical_address := v_physical_address || jsonb_build_object('zip', p_updates->>'zipCode');
+    
+    -- Handle billingAddress object (direct JSONB update)
+    IF p_updates ? 'billingAddress' THEN
+        v_billing_address := p_updates->'billingAddress';
     END IF;
     
     -- Update pharmacy record
@@ -357,6 +370,15 @@ BEGIN
             ELSE dea_number
         END,
         physical_address = v_physical_address,
+        billing_address = v_billing_address,
+        subscription_tier = CASE 
+            WHEN p_updates ? 'subscriptionTier' THEN p_updates->>'subscriptionTier'
+            ELSE subscription_tier
+        END,
+        subscription_status = CASE 
+            WHEN p_updates ? 'subscriptionStatus' THEN p_updates->>'subscriptionStatus'
+            ELSE subscription_status
+        END,
         updated_at = NOW()
     WHERE id = p_pharmacy_id;
     

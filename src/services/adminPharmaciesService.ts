@@ -80,6 +80,20 @@ export interface UpdatePharmacyData {
   licenseExpiryDate?: string;
   npiNumber?: string;
   deaNumber?: string;
+  physicalAddress?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+  };
+  billingAddress?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+  };
+  subscriptionTier?: string;
+  subscriptionStatus?: string;
 }
 
 // ============================================================

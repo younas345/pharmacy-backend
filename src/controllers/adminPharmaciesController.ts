@@ -93,6 +93,14 @@ export const updatePharmacyHandler = async (
       'state',
       'zipCode',
       'licenseNumber',
+      'stateLicenseNumber',
+      'licenseExpiryDate',
+      'npiNumber',
+      'deaNumber',
+      'physicalAddress',
+      'billingAddress',
+      'subscriptionTier',
+      'subscriptionStatus',
     ];
 
     const hasValidUpdates = Object.keys(updates).some((key) =>
@@ -104,6 +112,38 @@ export const updatePharmacyHandler = async (
         'No valid fields to update. Allowed fields: ' + allowedFields.join(', '),
         400
       );
+    }
+
+    // Validate subscription fields if provided
+    if (updates.subscriptionTier) {
+      const validTiers = ['free', 'basic', 'premium', 'enterprise'];
+      if (!validTiers.includes(updates.subscriptionTier)) {
+        throw new AppError(
+          `Invalid subscription tier. Must be one of: ${validTiers.join(', ')}`,
+          400
+        );
+      }
+    }
+
+    if (updates.subscriptionStatus) {
+      const validStatuses = ['active', 'trial', 'expired', 'cancelled', 'past_due'];
+      if (!validStatuses.includes(updates.subscriptionStatus)) {
+        throw new AppError(
+          `Invalid subscription status. Must be one of: ${validStatuses.join(', ')}`,
+          400
+        );
+      }
+    }
+
+    // Validate license expiry date format if provided
+    if (updates.licenseExpiryDate) {
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(updates.licenseExpiryDate)) {
+        throw new AppError(
+          'Invalid license expiry date format. Must be YYYY-MM-DD',
+          400
+        );
+      }
     }
 
     const result = await updatePharmacy(id, updates);
