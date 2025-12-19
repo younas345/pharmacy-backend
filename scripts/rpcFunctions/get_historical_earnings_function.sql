@@ -19,6 +19,9 @@ DECLARE
   avg_period_earnings NUMERIC;
   periods_with_earnings INTEGER;
 BEGIN
+  -- SECURITY: Check pharmacy status (block suspended/blacklisted)
+  PERFORM check_pharmacy_status(p_pharmacy_id);
+  
   -- Generate period earnings with all periods (even empty ones)
   IF p_period_type = 'yearly' THEN
     -- Yearly aggregation

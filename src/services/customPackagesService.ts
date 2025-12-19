@@ -237,6 +237,12 @@ export const createCustomPackage = async (
     total_value: item.totalValue, // This is now the discounted total value
   }));
 
+  // Debug: Log what's being inserted
+  console.log('📦 Creating package items with product_ids:');
+  packageItems.forEach((pi, idx) => {
+    console.log(`   Item ${idx + 1}: NDC=${pi.ndc}, product_id=${pi.product_id}, full=${pi.full}, partial=${pi.partial}`);
+  });
+
   const { error: itemsError } = await db.from('custom_package_items').insert(packageItems);
 
   if (itemsError) {

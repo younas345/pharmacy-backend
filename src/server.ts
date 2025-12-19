@@ -16,6 +16,8 @@ import distributorsRoutes from './routes/distributorsRoutes';
 import subscriptionRoutes from './routes/subscriptionRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import earningsEstimationRoutes from './routes/earningsEstimationRoutes';
+import adminDashboardRoutes from './routes/adminDashboardRoutes';
+import adminPharmaciesRoutes from './routes/adminPharmaciesRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
@@ -29,12 +31,13 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS Configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
+  'http://localhost:3002',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
+  'http://127.0.0.1:3002',
   'https://pharmacy-ui-75vl.vercel.app', // Without trailing slash
   'https://pharmacy-ui-75vl.vercel.app/', // With trailing slash (for safety)
   'https://pharm-admin.vercel.app',
@@ -112,6 +115,8 @@ app.use('/api/distributors', distributorsRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/earnings-estimation', earningsEstimationRoutes);
+app.use('/api/admin', adminDashboardRoutes);
+app.use('/api/admin/pharmacies', adminPharmaciesRoutes);
 
 /**
  * @swagger

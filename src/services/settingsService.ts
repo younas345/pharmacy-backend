@@ -23,6 +23,12 @@ export interface PharmacySettings {
     zip?: string;
   } | null;
   title?: string | null;
+  state_license_number?: string | null;
+  license_expiry_date?: string | null;
+  status?: string | null;
+  subscription_tier?: string | null;
+  subscription_status?: string | null;
+  trial_ends_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -36,6 +42,8 @@ export interface UpdateSettingsData {
   npi_number?: string;
   dea_number?: string;
   title?: string;
+  state_license_number?: string;
+  license_expiry_date?: string;
   physical_address?: {
     street?: string;
     city?: string;
@@ -86,6 +94,12 @@ export const getPharmacySettings = async (pharmacyId: string): Promise<PharmacyS
     physical_address: data.physical_address as any,
     billing_address: data.billing_address as any,
     title: (data as any).title || null,
+    state_license_number: (data as any).state_license_number || null,
+    license_expiry_date: (data as any).license_expiry_date || null,
+    status: (data as any).status || null,
+    subscription_tier: (data as any).subscription_tier || null,
+    subscription_status: (data as any).subscription_status || null,
+    trial_ends_at: (data as any).trial_ends_at || null,
     created_at: data.created_at,
     updated_at: data.updated_at,
   };
@@ -114,6 +128,8 @@ export const updatePharmacySettings = async (
   if (updateData.npi_number !== undefined) updateFields.npi_number = updateData.npi_number;
   if (updateData.dea_number !== undefined) updateFields.dea_number = updateData.dea_number;
   if (updateData.title !== undefined) updateFields.title = updateData.title;
+  if (updateData.state_license_number !== undefined) updateFields.state_license_number = updateData.state_license_number;
+  if (updateData.license_expiry_date !== undefined) updateFields.license_expiry_date = updateData.license_expiry_date;
   if (updateData.physical_address !== undefined) {
     updateFields.physical_address = updateData.physical_address;
   }
@@ -159,6 +175,12 @@ export const updatePharmacySettings = async (
     physical_address: data.physical_address as any,
     billing_address: data.billing_address as any,
     title: (data as any).title || null,
+    state_license_number: (data as any).state_license_number || null,
+    license_expiry_date: (data as any).license_expiry_date || null,
+    status: (data as any).status || null,
+    subscription_tier: (data as any).subscription_tier || null,
+    subscription_status: (data as any).subscription_status || null,
+    trial_ends_at: (data as any).trial_ends_at || null,
     created_at: data.created_at,
     updated_at: data.updated_at,
   };

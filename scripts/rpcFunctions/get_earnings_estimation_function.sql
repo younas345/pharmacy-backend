@@ -21,6 +21,9 @@ DECLARE
   opt_score INTEGER := 100;
   is_optimal BOOLEAN := true;
 BEGIN
+  -- SECURITY: Check pharmacy status (block suspended/blacklisted)
+  PERFORM check_pharmacy_status(p_pharmacy_id);
+  
   -- Create temp table for earnings comparison data (used by multiple queries)
   CREATE TEMP TABLE temp_earnings_comparison ON COMMIT DROP AS
   WITH all_pricing AS (

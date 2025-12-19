@@ -2,6 +2,7 @@ import pdf from 'pdf-parse';
 import { client, deployment } from '../config/azureOpenAI';
 import { AppError } from '../utils/appError';
 import { supabaseAdmin } from '../config/supabase';
+import { verifyPharmacyStatus } from '../middleware/auth';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -1607,6 +1608,9 @@ export const saveReturnReport = async (
     throw new AppError('Supabase admin client not configured', 500);
   }
 
+  // Verify pharmacy is not suspended/blacklisted
+  await verifyPharmacyStatus(input.pharmacy_id);
+
   const db = supabaseAdmin;
 
   // Extract items array from the data
@@ -1940,6 +1944,11 @@ export const getReturnReportsByDistributorAndNdc = async (
 ): Promise<ReturnReportMatchResult[]> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  // Verify pharmacy is not suspended/blacklisted (if pharmacyId is provided)
+  if (pharmacyId) {
+    await verifyPharmacyStatus(pharmacyId);
   }
 
   const db = supabaseAdmin;

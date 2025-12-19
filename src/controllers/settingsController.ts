@@ -77,6 +77,13 @@ export const getSettings = catchAsync(async (req: Request, res: Response, next: 
  *                 type: string
  *               title:
  *                 type: string
+ *               state_license_number:
+ *                 type: string
+ *                 description: State pharmacy license number (e.g., NY-12345, CA-67890)
+ *               license_expiry_date:
+ *                 type: string
+ *                 format: date
+ *                 description: Expiration date of the pharmacy license (YYYY-MM-DD)
  *               physical_address:
  *                 type: object
  *                 properties:

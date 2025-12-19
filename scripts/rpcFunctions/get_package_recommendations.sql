@@ -23,6 +23,11 @@ DECLARE
     v_total_products INTEGER := 0;
 BEGIN
     -- =====================================================
+    -- SECURITY: Check pharmacy status (block suspended/blacklisted)
+    -- =====================================================
+    PERFORM check_pharmacy_status(p_pharmacy_id);
+    
+    -- =====================================================
     -- STEP 1: Get all product_list_items for this pharmacy
     -- =====================================================
     
@@ -188,19 +193,17 @@ BEGIN
     WHERE rank = 1;
     
     -- =====================================================
-    -- STEP 6: Get existing package quantities by product_id
+    -- STEP 6: Get product_ids that already exist in custom packages
+    -- These will be EXCLUDED from recommendations entirely
     -- =====================================================
     
-    DROP TABLE IF EXISTS temp_existing_quantities;
-    CREATE TEMP TABLE temp_existing_quantities AS
-    SELECT 
-        cpi.product_id,
-        SUM(COALESCE(cpi.full, 0) + COALESCE(cpi.partial, 0)) AS existing_quantity
+    DROP TABLE IF EXISTS temp_existing_product_ids;
+    CREATE TEMP TABLE temp_existing_product_ids AS
+    SELECT DISTINCT cpi.product_id
     FROM custom_package_items cpi
     JOIN custom_packages cp ON cp.id = cpi.package_id
     WHERE cp.pharmacy_id = p_pharmacy_id
-    AND cpi.product_id IS NOT NULL
-    GROUP BY cpi.product_id;
+    AND cpi.product_id IS NOT NULL;
     
     -- =====================================================
     -- STEP 7: Build final result
@@ -225,38 +228,20 @@ BEGIN
         FROM reverse_distributors rd
     ),
     
-    -- Calculate products with adjusted quantities
-    products_with_quantities AS (
+    -- Filter out products that already exist in custom packages
+    filtered_products AS (
         SELECT 
             bp.product_id,
             bp.ndc,
             bp.product_name,
-            bp.full_units,
-            bp.partial_units,
+            bp.full_units AS new_full,
+            bp.partial_units AS new_partial,
+            (bp.full_units + bp.partial_units) AS new_total,
             bp.distributor_id,
             bp.distributor_name,
-            bp.price_per_unit,
-            COALESCE(eq.existing_quantity, 0) AS existing_quantity,
-            -- Calculate new quantities after decrement
-            GREATEST(0, (bp.full_units + bp.partial_units) - COALESCE(eq.existing_quantity, 0)) AS new_total,
-            -- Distribute back to full/partial
-            CASE 
-                WHEN bp.partial_units = 0 THEN GREATEST(0, bp.full_units - COALESCE(eq.existing_quantity, 0))
-                ELSE bp.full_units
-            END AS new_full,
-            CASE 
-                WHEN bp.full_units = 0 THEN GREATEST(0, bp.partial_units - COALESCE(eq.existing_quantity, 0))
-                ELSE bp.partial_units
-            END AS new_partial
+            bp.price_per_unit
         FROM temp_best_prices bp
-        LEFT JOIN temp_existing_quantities eq ON eq.product_id = bp.product_id
-    ),
-    
-    -- Filter out products with 0 quantity
-    filtered_products AS (
-        SELECT *
-        FROM products_with_quantities
-        WHERE new_total > 0
+        WHERE bp.product_id NOT IN (SELECT product_id FROM temp_existing_product_ids)
     ),
     
     -- Aggregate products by distributor
@@ -342,7 +327,7 @@ BEGIN
     DROP TABLE IF EXISTS temp_latest_full_prices;
     DROP TABLE IF EXISTS temp_latest_partial_prices;
     DROP TABLE IF EXISTS temp_best_prices;
-    DROP TABLE IF EXISTS temp_existing_quantities;
+    DROP TABLE IF EXISTS temp_existing_product_ids;
     
     RETURN v_result;
 END;

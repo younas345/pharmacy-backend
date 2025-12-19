@@ -263,6 +263,7 @@ export const signup = async (data: SignupData): Promise<AuthResponse> => {
         name,
         pharmacy_name: pharmacyName,
         phone: phone || null,
+        status: 'active', // Set to 'active' by default, or 'pending' if you want manual approval
       },
     ])
     .select()
@@ -325,6 +326,19 @@ export const signin = async (data: SigninData): Promise<AuthResponse> => {
     throw new AppError('Pharmacy profile not found', 404);
   }
 
+  // Step 2.5: Check pharmacy status - BLOCK suspended/blacklisted pharmacies from login
+  const pharmacyStatus = pharmacyData.status?.toLowerCase() || 'pending';
+  
+  if (pharmacyStatus === 'blacklisted') {
+    throw new AppError('Your pharmacy account has been permanently blocked. Access to the platform is denied. Please contact support for more information.', 403);
+  } else if (pharmacyStatus === 'suspended') {
+    throw new AppError('Your pharmacy account has been suspended. Please contact support to reactivate your account.', 403);
+  } else if (pharmacyStatus === 'pending') {
+    throw new AppError('Your pharmacy account is pending approval. Please wait for account activation or contact support.', 403);
+  } else if (pharmacyStatus !== 'active') {
+    throw new AppError('Your pharmacy account status is invalid. Please contact support.', 403);
+  }
+
   // Step 3: Revoke all existing refresh tokens (logout from all devices)
   // This ensures that when a user logs in, all previous sessions are invalidated
   await revokeAllRefreshTokens(authUserId);
@@ -383,6 +397,23 @@ export const refreshToken = async (data: RefreshTokenData): Promise<AuthResponse
     // Revoke the token since the user no longer exists
     await revokeRefreshToken(tokenId);
     throw new AppError('Pharmacy profile not found', 404);
+  }
+
+  // Check pharmacy status - BLOCK suspended/blacklisted pharmacies from refreshing tokens
+  const pharmacyStatus = pharmacyData.status?.toLowerCase() || 'pending';
+  
+  if (pharmacyStatus === 'blacklisted') {
+    await revokeRefreshToken(tokenId);
+    throw new AppError('Your pharmacy account has been permanently blocked. Access to the platform is denied. Please contact support for more information.', 403);
+  } else if (pharmacyStatus === 'suspended') {
+    await revokeRefreshToken(tokenId);
+    throw new AppError('Your pharmacy account has been suspended. Please contact support to reactivate your account.', 403);
+  } else if (pharmacyStatus === 'pending') {
+    await revokeRefreshToken(tokenId);
+    throw new AppError('Your pharmacy account is pending approval. Please wait for account activation or contact support.', 403);
+  } else if (pharmacyStatus !== 'active') {
+    await revokeRefreshToken(tokenId);
+    throw new AppError('Your pharmacy account status is invalid. Please contact support.', 403);
   }
 
   // Get user details from Supabase Auth
