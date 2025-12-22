@@ -1931,9 +1931,10 @@ export interface ReturnReportGraphResponse {
 /**
  * Get matching return report records by distributor ID and NDC code
  * Groups results by report date and returns count of matched codes
+ * NOTE: Searches ALL documents for the distributor (shared pricing data across all pharmacies)
  * @param distributorId - Reverse distributor ID
  * @param ndcCode - NDC code to search for
- * @param pharmacyId - Optional pharmacy ID to filter by
+ * @param pharmacyId - Optional pharmacy ID (used for status verification only, not for filtering)
  * @param type - Optional type filter: 'full' to match records with full > 0, 'partial' to match records with partial > 0
  */
 export const getReturnReportsByDistributorAndNdc = async (
@@ -1953,24 +1954,23 @@ export const getReturnReportsByDistributorAndNdc = async (
 
   const db = supabaseAdmin;
 
-  // Step 1: Get all document IDs for the specified distributor
-  let documentsQuery = db
+  // Step 1: Get ALL document IDs for the specified distributor
+  // NOTE: All pharmacies can access all documents for shared pricing data
+  console.log(`🔍 Searching ALL documents for distributor: ${distributorId}`);
+  
+  const { data: documents, error: documentsError } = await db
     .from('uploaded_documents')
     .select('id, report_date')
     .eq('reverse_distributor_id', distributorId);
-
-  // Filter by pharmacy_id if provided
-  if (pharmacyId) {
-    documentsQuery = documentsQuery.eq('pharmacy_id', pharmacyId);
-  }
-
-  const { data: documents, error: documentsError } = await documentsQuery;
 
   if (documentsError) {
     throw new AppError(`Failed to fetch documents: ${documentsError.message}`, 400);
   }
 
+  console.log(`📄 Found ${documents?.length || 0} total documents for this distributor`);
+
   if (!documents || documents.length === 0) {
+    console.log(`❌ No documents found for distributor: ${distributorId}`);
     return [];
   }
 
@@ -1981,18 +1981,55 @@ export const getReturnReportsByDistributorAndNdc = async (
   });
 
   // Step 2: Query return_reports for matching NDC codes and document IDs
-  let returnReportsQuery = db
+  // Use flexible NDC matching (similar to optimizationService.ts)
+  const normalized = String(ndcCode).replace(/-/g, '').trim();
+  const withDashes = String(ndcCode).trim();
+  
+  // Helper function to format NDC with dashes (5-4-2 format, most common)
+  const formatNdcWithDashes = (ndc: string): string => {
+    const clean = ndc.replace(/-/g, '');
+    if (clean.length === 11) {
+      return `${clean.slice(0, 5)}-${clean.slice(5, 9)}-${clean.slice(9)}`;
+    }
+    return ndc;
+  };
+  
+  // Generate dashed version if the input is without dashes
+  const dashedFormat = formatNdcWithDashes(normalized);
+  
+  // Build OR conditions for flexible NDC matching
+  const orConditions: string[] = [];
+  
+  // Match ndcCode field with various formats
+  orConditions.push(`data->>ndcCode.ilike.%${withDashes}%`);
+  if (normalized !== withDashes) {
+    orConditions.push(`data->>ndcCode.ilike.%${normalized}%`);
+  }
+  if (dashedFormat !== withDashes && dashedFormat !== normalized) {
+    orConditions.push(`data->>ndcCode.ilike.%${dashedFormat}%`);
+  }
+  
+  // Also match 'ndc' field if it exists (some records may use 'ndc' instead of 'ndcCode')
+  orConditions.push(`data->>ndc.ilike.%${withDashes}%`);
+  if (normalized !== withDashes) {
+    orConditions.push(`data->>ndc.ilike.%${normalized}%`);
+  }
+  if (dashedFormat !== withDashes && dashedFormat !== normalized) {
+    orConditions.push(`data->>ndc.ilike.%${dashedFormat}%`);
+  }
+  
+  console.log(`🔍 Searching return_reports with flexible NDC matching:`);
+  console.log(`   Input NDC: ${ndcCode}`);
+  console.log(`   Searching in ${documentIds.length} documents (all pharmacies)`);
+  
+  // Query ALL return reports for matching documents (no pharmacy_id filter - shared data)
+  const { data: returnReports, error } = await db
     .from('return_reports')
     .select('id, document_id, pharmacy_id, data, created_at')
     .in('document_id', documentIds)
-    .eq('data->>ndcCode', ndcCode);
-
-  // Filter by pharmacy_id if provided
-  if (pharmacyId) {
-    returnReportsQuery = returnReportsQuery.eq('pharmacy_id', pharmacyId);
-  }
-
-  const { data: returnReports, error } = await returnReportsQuery;
+    .or(orConditions.join(','));
+  
+  console.log(`📊 Found ${returnReports?.length || 0} matching return reports for NDC: ${ndcCode}`);
 
   if (error) {
     throw new AppError(`Failed to fetch return reports: ${error.message}`, 400);

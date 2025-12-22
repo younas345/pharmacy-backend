@@ -19,6 +19,7 @@ import earningsEstimationRoutes from './routes/earningsEstimationRoutes';
 import adminDashboardRoutes from './routes/adminDashboardRoutes';
 import adminPharmaciesRoutes from './routes/adminPharmaciesRoutes';
 import adminDistributorsRoutes from './routes/adminDistributorsRoutes';
+import adminDocumentsRoutes from './routes/adminDocumentsRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
@@ -119,6 +120,7 @@ app.use('/api/earnings-estimation', earningsEstimationRoutes);
 app.use('/api/admin', adminDashboardRoutes);
 app.use('/api/admin/pharmacies', adminPharmaciesRoutes);
 app.use('/api/admin/distributors', adminDistributorsRoutes);
+app.use('/api/admin/documents', adminDocumentsRoutes);
 
 /**
  * @swagger
