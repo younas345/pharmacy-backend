@@ -11,6 +11,7 @@ export interface OptimizationRecommendation {
   lotNumber?: string;
   expirationDate?: string;
   recommendedDistributor: string;
+  recommendedDistributorId?: string; // Distributor UUID
   recommendedDistributorContact?: {
     email?: string;
     phone?: string;
@@ -22,6 +23,7 @@ export interface OptimizationRecommendation {
   partialPricePerUnit?: number; // Price per unit for partial units (search mode only)
   available?: boolean;
   alternativeDistributors: Array<{
+    id?: string; // Distributor UUID
     name: string;
     price: number;
     fullPrice?: number; // Price for full units from this distributor
@@ -1297,6 +1299,7 @@ export const getOptimizationRecommendations = async (
     // Now just use the highest price distributor (first one since already sorted)
     let recommended: { name: string; price: number; fullPrice?: number; partialPrice?: number } | null = null;
     const alternatives: Array<{ 
+      id?: string; // Distributor UUID
       name: string; 
       price: number;
       fullPrice?: number;
@@ -1331,7 +1334,9 @@ export const getOptimizationRecommendations = async (
       rec._distributorAverages.forEach((dist) => {
         if (dist.name !== recommended!.name) {
           const contactInfo = distributorContactInfoMap[dist.name] || {};
+          const distributorId = distributorNameToIdMap[dist.name];
           alternatives.push({
+            id: distributorId, // Add distributor UUID
             name: dist.name,
             price: dist.price,
             fullPrice: dist.fullPrice,
@@ -1344,7 +1349,7 @@ export const getOptimizationRecommendations = async (
             // COMMENTED OUT: available: distributorAvailabilityMap[dist.name] ?? false,
             available: true, // Always mark as available since we're not checking
           });
-          console.log(`   ➕ Added alternative: ${dist.name} (price: ${dist.price}, fullPrice: ${dist.fullPrice}, partialPrice: ${dist.partialPrice}, difference: ${dist.price - recommended!.price})`);
+          console.log(`   ➕ Added alternative: ${dist.name} (id: ${distributorId}, price: ${dist.price}, fullPrice: ${dist.fullPrice}, partialPrice: ${dist.partialPrice}, difference: ${dist.price - recommended!.price})`);
         }
       });
       console.log(`   📋 Total alternatives: ${alternatives.length}`);
@@ -1354,7 +1359,9 @@ export const getOptimizationRecommendations = async (
 
     if (recommended) {
       const recommendedContactInfo = distributorContactInfoMap[recommended.name] || {};
+      const recommendedDistributorId = distributorNameToIdMap[recommended.name];
       rec.recommendedDistributor = recommended.name;
+      rec.recommendedDistributorId = recommendedDistributorId; // Add distributor UUID
       rec.recommendedDistributorContact = {
         email: recommendedContactInfo.email,
         phone: recommendedContactInfo.phone,
@@ -1372,7 +1379,7 @@ export const getOptimizationRecommendations = async (
       const worstPrice = rec.worstPrice;
       rec.savings = Math.max(0, (recommended.price - worstPrice) * (rec.quantity || 1));
       
-      console.log(`   💰 Set prices for ${rec.ndc}: expectedPrice=${rec.expectedPrice}, fullPricePerUnit=${rec.fullPricePerUnit}, partialPricePerUnit=${rec.partialPricePerUnit}`);
+      console.log(`   💰 Set prices for ${rec.ndc}: recommendedDistributor=${rec.recommendedDistributor} (id: ${recommendedDistributorId}), expectedPrice=${rec.expectedPrice}, fullPricePerUnit=${rec.fullPricePerUnit}, partialPricePerUnit=${rec.partialPricePerUnit}`);
     }
 
     // Remove temporary storage
