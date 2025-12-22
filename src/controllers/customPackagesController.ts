@@ -20,7 +20,7 @@ export const createCustomPackageHandler = catchAsync(
       throw new AppError('Pharmacy ID is required', 400);
     }
 
-    const { distributorName, distributorId, items, notes, feeRate } = req.body;
+    const { distributorName, distributorId, items, notes, feeRate, feeDuration } = req.body;
 
     const packageData: CreateCustomPackageRequest = {
       distributorName,
@@ -28,6 +28,7 @@ export const createCustomPackageHandler = catchAsync(
       items,
       notes,
       feeRate,
+      feeDuration,
     };
 
     // pharmacyId is the same as userId in this system

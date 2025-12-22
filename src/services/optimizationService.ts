@@ -2698,6 +2698,8 @@ export interface ExistingPackageInfo {
   packageNumber: string;
   totalItems: number;
   totalEstimatedValue: number;
+  feeRate?: number;
+  feeDuration?: number;
   createdAt: string;
 }
 
@@ -3126,7 +3128,7 @@ export const getPackageSuggestionsByNdcs = async (
   if (distributorNames.length > 0) {
     const { data: existingPackages, error: existingError } = await db
       .from('custom_packages')
-      .select('id, package_number, distributor_name, distributor_id, status, total_items, total_estimated_value, created_at')
+      .select('id, package_number, distributor_name, distributor_id, status, total_items, total_estimated_value, fee_rate, fee_duration, created_at')
       .eq('pharmacy_id', pharmacyId)
       .eq('status', false) // Only consider non-delivered packages
       .in('distributor_name', distributorNames);
@@ -3140,6 +3142,8 @@ export const getPackageSuggestionsByNdcs = async (
           packageNumber: pkg.package_number,
           totalItems: pkg.total_items,
           totalEstimatedValue: pkg.total_estimated_value,
+          feeRate: pkg.fee_rate || undefined,
+          feeDuration: pkg.fee_duration || undefined,
           createdAt: pkg.created_at,
         };
       });

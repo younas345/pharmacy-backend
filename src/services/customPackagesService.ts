@@ -24,6 +24,7 @@ export interface CreateCustomPackageRequest {
   items: CustomPackageItem[];
   notes?: string;
   feeRate?: number; // Fee rate percentage (e.g., 13.4 for 13.4%)
+  feeDuration?: number; // Fee duration in days (e.g., 30, 60, 90)
 }
 
 // Interface for delivery information
@@ -52,6 +53,7 @@ export interface CustomPackage {
   totalItems: number;
   totalEstimatedValue: number;
   feeRate?: number; // Fee rate percentage (e.g., 13.4 for 13.4%)
+  feeDuration?: number; // Fee duration in days (e.g., 30, 60, 90)
   feeAmount?: number; // Calculated fee amount based on fee rate
   netEstimatedValue?: number; // Total value after fee deduction
   notes?: string;
@@ -212,6 +214,7 @@ export const createCustomPackage = async (
       total_items: totalItems,
       total_estimated_value: totalEstimatedValue,
       fee_rate: feeRate,
+      fee_duration: packageData.feeDuration || null,
       fee_amount: Math.round(feeAmount * 100) / 100,
       net_estimated_value: Math.round(netEstimatedValue * 100) / 100,
       notes: packageData.notes || null,
@@ -285,6 +288,7 @@ export const createCustomPackage = async (
     totalItems,
     totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
     feeRate: packageRecord.fee_rate || undefined,
+    feeDuration: packageRecord.fee_duration || undefined,
     feeAmount: packageRecord.fee_amount ? Math.round(packageRecord.fee_amount * 100) / 100 : undefined,
     netEstimatedValue: packageRecord.net_estimated_value ? Math.round(packageRecord.net_estimated_value * 100) / 100 : undefined,
     notes: packageRecord.notes || undefined,
@@ -433,6 +437,7 @@ export const getCustomPackages = async (
       totalItems: pkg.total_items,
       totalEstimatedValue: pkg.total_estimated_value,
       feeRate: pkg.fee_rate || undefined,
+      feeDuration: pkg.fee_duration || undefined,
       feeAmount: pkg.fee_amount ? Math.round(pkg.fee_amount * 100) / 100 : undefined,
       netEstimatedValue: pkg.net_estimated_value ? Math.round(pkg.net_estimated_value * 100) / 100 : undefined,
       notes: pkg.notes || undefined,
@@ -605,6 +610,7 @@ export const getCustomPackageById = async (
     totalItems: packageRecord.total_items,
     totalEstimatedValue: packageRecord.total_estimated_value,
     feeRate: packageRecord.fee_rate || undefined,
+    feeDuration: packageRecord.fee_duration || undefined,
     feeAmount: packageRecord.fee_amount ? Math.round(packageRecord.fee_amount * 100) / 100 : undefined,
     netEstimatedValue: packageRecord.net_estimated_value ? Math.round(packageRecord.net_estimated_value * 100) / 100 : undefined,
     notes: packageRecord.notes || undefined,
@@ -822,6 +828,7 @@ export const updatePackageStatus = async (
     totalItems: updatedPackage.total_items,
     totalEstimatedValue: updatedPackage.total_estimated_value,
     feeRate: updatedPackage.fee_rate || undefined,
+    feeDuration: updatedPackage.fee_duration || undefined,
     feeAmount: updatedPackage.fee_amount ? Math.round(updatedPackage.fee_amount * 100) / 100 : undefined,
     netEstimatedValue: updatedPackage.net_estimated_value ? Math.round(updatedPackage.net_estimated_value * 100) / 100 : undefined,
     notes: updatedPackage.notes || undefined,
@@ -1031,6 +1038,7 @@ export const addItemsToCustomPackage = async (
     totalItems: updatedPackage.total_items,
     totalEstimatedValue: Math.round(updatedPackage.total_estimated_value * 100) / 100,
     feeRate: updatedPackage.fee_rate || undefined,
+    feeDuration: updatedPackage.fee_duration || undefined,
     feeAmount: updatedPackage.fee_amount ? Math.round(updatedPackage.fee_amount * 100) / 100 : undefined,
     netEstimatedValue: updatedPackage.net_estimated_value ? Math.round(updatedPackage.net_estimated_value * 100) / 100 : undefined,
     notes: updatedPackage.notes || undefined,
