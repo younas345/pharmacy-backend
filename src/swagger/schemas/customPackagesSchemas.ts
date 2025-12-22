@@ -116,6 +116,13 @@ export const customPackagesSchemas = {
         minimum: 0,
         maximum: 100,
       },
+      feeDuration: {
+        type: 'number',
+        example: 30,
+        nullable: true,
+        description: 'Fee duration in days (e.g., 30, 60, 90 days). Indicates the payment period for the fee rate.',
+        minimum: 1,
+      },
     },
   },
   DistributorContact: {
@@ -239,6 +246,12 @@ export const customPackagesSchemas = {
         example: 13.4,
         nullable: true,
         description: 'Fee rate percentage applied to this package',
+      },
+      feeDuration: {
+        type: 'number',
+        example: 30,
+        nullable: true,
+        description: 'Fee duration in days (e.g., 30, 60, 90 days)',
       },
       feeAmount: {
         type: 'number',

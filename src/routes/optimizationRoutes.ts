@@ -306,6 +306,16 @@ router.get('/packages/by-ndc', getPackageRecommendationsByNdcsHandler);
  *                               totalEstimatedValue:
  *                                 type: number
  *                                 example: 250.50
+ *                               feeRate:
+ *                                 type: number
+ *                                 nullable: true
+ *                                 example: 13.4
+ *                                 description: Fee rate percentage applied to this package
+ *                               feeDuration:
+ *                                 type: number
+ *                                 nullable: true
+ *                                 example: 30
+ *                                 description: Fee duration in days (e.g., 30, 60, 90)
  *                               createdAt:
  *                                 type: string
  *                                 format: date-time
