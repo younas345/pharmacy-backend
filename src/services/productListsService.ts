@@ -135,81 +135,64 @@ export const getProductListItems = async (pharmacyId: string): Promise<ProductLi
   }
 
   // Get all items from ALL packages to calculate quantities used
+  // IMPORTANT: Use product_id (not NDC) to track which specific product list items are used
   const { data: packageItems, error: packageItemsError } = await db
     .from('custom_package_items')
-    .select('ndc, full, partial')
+    .select('product_id, full, partial')
     .in('package_id', allPackageIds);
 
   if (packageItemsError) {
     throw new AppError(`Failed to fetch package items: ${packageItemsError.message}`, 400);
   }
 
-  // Build a map of NDC to total quantity used in packages
-  // Use normalized NDC (without dashes) for matching
-  const usedQuantityMap: Record<string, number> = {};
+  // Build a map of product_id to total quantity used in packages
+  // Each product list item is tracked by its unique ID (not merged by NDC)
+  const usedQuantityByProductId: Record<string, { full: number; partial: number }> = {};
   (packageItems || []).forEach((pkgItem: any) => {
-    const normalizedNdc = String(pkgItem.ndc).replace(/-/g, '').trim();
-    if (!usedQuantityMap[normalizedNdc]) {
-      usedQuantityMap[normalizedNdc] = 0;
+    if (pkgItem.product_id) {
+      if (!usedQuantityByProductId[pkgItem.product_id]) {
+        usedQuantityByProductId[pkgItem.product_id] = { full: 0, partial: 0 };
+      }
+      // Track full and partial separately
+      usedQuantityByProductId[pkgItem.product_id].full += (pkgItem.full || 0);
+      usedQuantityByProductId[pkgItem.product_id].partial += (pkgItem.partial || 0);
     }
-    // Sum full + partial as total quantity used
-    usedQuantityMap[normalizedNdc] += (pkgItem.full || 0) + (pkgItem.partial || 0);
   });
 
   console.log('\n========== PRODUCT LIST ITEMS DEBUG ==========');
-  console.log('📦 Package items used by NDC:', usedQuantityMap);
+  console.log('📦 Package items used by product_id:', usedQuantityByProductId);
   console.log('📋 Product list items from DB:', items.map((i: any) => ({
+    id: i.id,
     ndc: i.ndc,
-    normalized: String(i.ndc).replace(/-/g, '').trim(),
     full: i.full_units,
     partial: i.partial_units,
     total: (i.full_units || 0) + (i.partial_units || 0)
   })));
 
-  // Track remaining "used" quantity to consume per NDC
-  // This handles multiple items with the same NDC correctly
-  const remainingUsedMap: Record<string, number> = { ...usedQuantityMap };
-
-  // Process each item: subtract used quantities and filter out items with remaining <= 0
+  // Process each item: subtract used quantities based on product_id and filter out items with remaining <= 0
   const result: ProductListItem[] = [];
   
   for (const item of items) {
-    const normalizedItemNdc = String(item.ndc).replace(/-/g, '').trim();
     const originalFullUnits = item.full_units || 0;
     const originalPartialUnits = item.partial_units || 0;
-    const itemQuantity = originalFullUnits + originalPartialUnits;
     
-    // Get how much is still "to be consumed" for this NDC
-    const toConsume = remainingUsedMap[normalizedItemNdc] || 0;
+    // Get how much is used for THIS specific product (by ID)
+    const usedForThisProduct = usedQuantityByProductId[item.id] || { full: 0, partial: 0 };
     
-    // Calculate how much to subtract from THIS item (up to item's quantity)
-    const subtractFromItem = Math.min(toConsume, itemQuantity);
-    const remainingQuantity = itemQuantity - subtractFromItem;
-    
-    // Update the remaining "to consume" for this NDC
-    remainingUsedMap[normalizedItemNdc] = Math.max(0, toConsume - subtractFromItem);
+    // Calculate remaining quantities
+    const adjustedFullUnits = Math.max(0, originalFullUnits - usedForThisProduct.full);
+    const adjustedPartialUnits = Math.max(0, originalPartialUnits - usedForThisProduct.partial);
+    const remainingQuantity = adjustedFullUnits + adjustedPartialUnits;
 
-    console.log(`\n📊 Processing: NDC=${item.ndc} (normalized: ${normalizedItemNdc})`);
+    console.log(`\n📊 Processing: id=${item.id}, NDC=${item.ndc}`);
     console.log(`   DB values: full_units=${originalFullUnits}, partial_units=${originalPartialUnits}`);
-    console.log(`   Calculation: itemQty=${itemQuantity}, toConsume=${toConsume}, subtract=${subtractFromItem}`);
-    console.log(`   Result: remainingQuantity=${remainingQuantity}`);
+    console.log(`   Used in packages: full=${usedForThisProduct.full}, partial=${usedForThisProduct.partial}`);
+    console.log(`   Result: adjustedFull=${adjustedFullUnits}, adjustedPartial=${adjustedPartialUnits}, remainingQty=${remainingQuantity}`);
 
     // Only remove if remaining quantity is 0 or negative (completely used)
     if (remainingQuantity <= 0) {
       console.log(`   ❌ REMOVING - remaining (${remainingQuantity}) <= 0`);
       continue;
-    }
-
-    // Calculate adjusted full_units and partial_units
-    let adjustedFullUnits = originalFullUnits;
-    let adjustedPartialUnits = originalPartialUnits;
-
-    if (originalFullUnits > 0 && originalPartialUnits === 0) {
-      // Full units only - subtract from full_units
-      adjustedFullUnits = Math.max(0, originalFullUnits - subtractFromItem);
-    } else if (originalPartialUnits > 0 && originalFullUnits === 0) {
-      // Partial units only - subtract from partial_units
-      adjustedPartialUnits = Math.max(0, originalPartialUnits - subtractFromItem);
     }
 
     console.log(`   ✅ KEEPING - full_units=${adjustedFullUnits}, partial_units=${adjustedPartialUnits}, quantity=${remainingQuantity}`);
