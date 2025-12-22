@@ -179,22 +179,34 @@ export const getOptimizationRecommendations = async (
     ndcs = [...new Set(productItems.map((item) => item.ndc))];
     
     // Build unit type map for each NDC based on inventory
-    // If partial_units = 0, then requiresFull = true (match full > 0 records)
-    // If full_units = 0, then requiresPartial = true (match partial > 0 records)
+    // If full_units > 0, we need to fetch return_reports with full > 0 (for full prices)
+    // If partial_units > 0, we need to fetch return_reports with partial > 0 (for partial prices)
+    // IMPORTANT: When same NDC has both full and partial items, MERGE requirements (OR logic)
+    // This ensures we fetch return_reports for BOTH unit types when needed
     productItems.forEach((inventoryItem) => {
       const normalizedNdc = String(inventoryItem.ndc).replace(/-/g, '').trim();
       const fullUnits = inventoryItem.full_units || 0;
       const partialUnits = inventoryItem.partial_units || 0;
       
-      // If partial_units = 0, then it's a full unit item (match full > 0 records)
-      const requiresFull = partialUnits === 0 && fullUnits > 0;
-      // If full_units = 0, then it's a partial unit item (match partial > 0 records)
-      const requiresPartial = fullUnits === 0 && partialUnits > 0;
+      // Simple logic: if item has full units, we need full price records
+      // If item has partial units, we need partial price records
+      const itemNeedsFull = fullUnits > 0;
+      const itemNeedsPartial = partialUnits > 0;
       
-      // Only set if we have a requirement (one of them must be true based on the constraint)
-      if (requiresFull || requiresPartial) {
-        ndcUnitTypeMap.set(normalizedNdc, { requiresFull, requiresPartial });
-        console.log(`📋 Inventory NDC ${inventoryItem.ndc} (normalized: ${normalizedNdc}): full_units=${fullUnits}, partial_units=${partialUnits} → requiresFull=${requiresFull}, requiresPartial=${requiresPartial}`);
+      // Only set if we have a requirement
+      if (itemNeedsFull || itemNeedsPartial) {
+        // Check if we already have requirements for this NDC - MERGE with OR logic
+        const existing = ndcUnitTypeMap.get(normalizedNdc);
+        if (existing) {
+          // Merge: if ANY item needs full OR partial, set that flag to true
+          const mergedRequiresFull = existing.requiresFull || itemNeedsFull;
+          const mergedRequiresPartial = existing.requiresPartial || itemNeedsPartial;
+          ndcUnitTypeMap.set(normalizedNdc, { requiresFull: mergedRequiresFull, requiresPartial: mergedRequiresPartial });
+          console.log(`📋 Inventory NDC ${inventoryItem.ndc} (normalized: ${normalizedNdc}): full_units=${fullUnits}, partial_units=${partialUnits} → MERGED requiresFull=${mergedRequiresFull}, requiresPartial=${mergedRequiresPartial}`);
+        } else {
+          ndcUnitTypeMap.set(normalizedNdc, { requiresFull: itemNeedsFull, requiresPartial: itemNeedsPartial });
+          console.log(`📋 Inventory NDC ${inventoryItem.ndc} (normalized: ${normalizedNdc}): full_units=${fullUnits}, partial_units=${partialUnits} → requiresFull=${itemNeedsFull}, requiresPartial=${itemNeedsPartial}`);
+        }
       }
     });
   }
@@ -528,25 +540,35 @@ export const getOptimizationRecommendations = async (
         if (unitTypeRequirement) {
           const { requiresFull, requiresPartial } = unitTypeRequirement;
           
-          // If requiresFull, only match records where full > 0 and partial = 0
-          if (requiresFull) {
-            if (itemFull === 0 || itemPartial > 0) {
-              // Skip: full is 0 or partial > 0 (doesn't match FullCount requirement)
+          // A full-only record: full > 0 AND partial = 0
+          const isFullOnlyRecord = itemFull > 0 && itemPartial === 0;
+          // A partial-only record: partial > 0 AND full = 0
+          const isPartialOnlyRecord = itemPartial > 0 && itemFull === 0;
+          
+          // When BOTH requiresFull and requiresPartial are true (same NDC has items with both unit types),
+          // accept records that match EITHER requirement (OR logic)
+          if (requiresFull && requiresPartial) {
+            // Accept if it's a valid full-only OR partial-only record
+            if (!isFullOnlyRecord && !isPartialOnlyRecord) {
+              console.log(`   ⏭️ Skipping item - Mixed requirement for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need either full-only or partial-only record)`);
+              return;
+            }
+            console.log(`   ✅ Item passed unit filter (BOTH types needed) for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial}, isFullOnly=${isFullOnlyRecord}, isPartialOnly=${isPartialOnlyRecord}`);
+          } else if (requiresFull) {
+            // Only full is required - match full-only records
+            if (!isFullOnlyRecord) {
               console.log(`   ⏭️ Skipping item - FullCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need full > 0 and partial = 0)`);
               return;
             }
-          }
-          
-          // If requiresPartial, only match records where partial > 0 and full = 0
-          if (requiresPartial) {
-            if (itemPartial === 0 || itemFull > 0) {
-              // Skip: partial is 0 or full > 0 (doesn't match PartialCount requirement)
+            console.log(`   ✅ Item passed unit filter (Full required) for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial}`);
+          } else if (requiresPartial) {
+            // Only partial is required - match partial-only records
+            if (!isPartialOnlyRecord) {
               console.log(`   ⏭️ Skipping item - PartialCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need partial > 0 and full = 0)`);
               return;
             }
+            console.log(`   ✅ Item passed unit filter (Partial required) for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial}`);
           }
-          
-          console.log(`   ✅ Item passed unit filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial}`);
         }
       }
       
@@ -637,48 +659,8 @@ export const getOptimizationRecommendations = async (
           ndcToPartialMap[originalNdcFormat] = itemPartial;
         }
       } else {
-        // Non-search mode: filter by unit type based on inventory
-        if (ndcUnitTypeMap.size > 0) {
-          // Get full and partial from item data (return_reports uses "full" and "partial" fields)
-          const itemFull = Number(item.full) || 0;
-          const itemPartial = Number(item.partial) || 0;
-          
-          // Find which NDC this item matches and get its unit type requirement
-          let unitTypeRequirement: { requiresFull: boolean; requiresPartial: boolean } | undefined;
-          
-          // Check if this normalized NDC matches any inventory NDC
-          for (const [normalizedInventoryNdc, requirement] of ndcUnitTypeMap.entries()) {
-            if (normalizedNdcCode === normalizedInventoryNdc) {
-              unitTypeRequirement = requirement;
-              break;
-            }
-          }
-          
-          // If we have a requirement for this NDC, apply the filter
-          if (unitTypeRequirement) {
-            const { requiresFull, requiresPartial } = unitTypeRequirement;
-            
-            // If requiresFull, only match records where full > 0 and partial = 0
-            if (requiresFull) {
-              if (itemFull === 0 || itemPartial > 0) {
-                // Skip: full is 0 or partial > 0 (doesn't match FullCount requirement)
-                console.log(`   ⏭️ Skipping item - FullCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need full > 0 and partial = 0)`);
-                return;
-              }
-            }
-            
-            // If requiresPartial, only match records where partial > 0 and full = 0
-            if (requiresPartial) {
-              if (itemPartial === 0 || itemFull > 0) {
-                // Skip: partial is 0 or full > 0 (doesn't match PartialCount requirement)
-                console.log(`   ⏭️ Skipping item - PartialCount filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial} (need partial > 0 and full = 0)`);
-                return;
-              }
-            }
-            
-            console.log(`   ✅ Item passed unit filter for NDC ${ndcCode}: full=${itemFull}, partial=${itemPartial}`);
-          }
-        }
+        // Non-search mode: The unit type filtering has already been done in the first block (lines 525-574)
+        // No need to duplicate the filtering logic here
         
         // Exact match mode: use pre-computed lookup map for O(1) access
         // IMPORTANT: normalizedNdcLookup only contains NDCs from current pharmacy's product_list_items
@@ -759,22 +741,21 @@ export const getOptimizationRecommendations = async (
           }
         }
         
-        // In search mode, track FULL and PARTIAL prices separately per distributor-NDC
+        // Track FULL and PARTIAL prices separately per distributor-NDC (for ALL modes)
         // A record is for FULL if full > 0 and partial = 0
         // A record is for PARTIAL if partial > 0 and full = 0
-        if (isSearchMode) {
-          const isFullRecord = itemFull > 0 && itemPartial === 0;
-          const isPartialRecord = itemPartial > 0 && itemFull === 0;
-          
-          if (isFullRecord && !distributorNdcToFullPriceMap[distributorNdcKey]) {
-            distributorNdcToFullPriceMap[distributorNdcKey] = pricePerUnit;
-            console.log(`   💰 FULL price for ${distributorName}|${actualNdcKey}: ${pricePerUnit}`);
-          }
-          
-          if (isPartialRecord && !distributorNdcToPartialPriceMap[distributorNdcKey]) {
-            distributorNdcToPartialPriceMap[distributorNdcKey] = pricePerUnit;
-            console.log(`   💰 PARTIAL price for ${distributorName}|${actualNdcKey}: ${pricePerUnit}`);
-          }
+        // This is essential for non-search mode when same NDC has both full and partial inventory items
+        const isFullRecord = itemFull > 0 && itemPartial === 0;
+        const isPartialRecord = itemPartial > 0 && itemFull === 0;
+        
+        if (isFullRecord && !distributorNdcToFullPriceMap[distributorNdcKey]) {
+          distributorNdcToFullPriceMap[distributorNdcKey] = pricePerUnit;
+          console.log(`   💰 FULL price for ${distributorName}|${actualNdcKey}: ${pricePerUnit}`);
+        }
+        
+        if (isPartialRecord && !distributorNdcToPartialPriceMap[distributorNdcKey]) {
+          distributorNdcToPartialPriceMap[distributorNdcKey] = pricePerUnit;
+          console.log(`   💰 PARTIAL price for ${distributorName}|${actualNdcKey}: ${pricePerUnit}`);
         }
         
         console.log(`✅ Matched NDC ${actualNdcKey} (search term: ${matchingNdc}) with distributor "${distributorName}", price: ${pricePerUnit}, full=${itemFull}, partial=${itemPartial}`);
@@ -1038,26 +1019,33 @@ export const getOptimizationRecommendations = async (
       console.log(`⚠️ Only 1 distributor found for NDC ${ndc} - no alternatives possible`);
     }
 
+    // Determine if this inventory item needs full or partial prices
+    // An item with full_units > 0 needs FULL price records from return_reports
+    // An item with partial_units > 0 needs PARTIAL price records from return_reports
+    const needsFullPrice = fullPartial.full > 0;
+    const needsPartialPrice = fullPartial.partial > 0;
+    
     // Calculate price per distributor
-    // Always use latest price based on report_date (not average)
+    // IMPORTANT: Only use prices that match the inventory item's unit type
+    // If no matching price exists, that distributor should NOT be recommended
     const distributorAverages: Array<{ name: string; price: number; fullPrice?: number; partialPrice?: number }> = Object.entries(
       distributorPrices
     )
       .filter(([_, data]) => data.count > 0) // Ensure we have valid data
       .map(([name, data]) => {
         const distributorName = name.trim();
-        let price: number;
+        let price: number = 0; // Default to 0 - means no valid price for this unit type
         
         const distributorNdcKey = `${distributorName}|${ndc}`;
         
-        // In search mode, get full and partial prices separately
-        const fullPrice = isSearchMode ? (distributorNdcToFullPriceMap[distributorNdcKey] || 0) : undefined;
-        const partialPrice = isSearchMode ? (distributorNdcToPartialPriceMap[distributorNdcKey] || 0) : undefined;
+        // Get full and partial prices (available in ALL modes now)
+        const fullPrice = distributorNdcToFullPriceMap[distributorNdcKey] || 0;
+        const partialPrice = distributorNdcToPartialPriceMap[distributorNdcKey] || 0;
         
         if (isSearchMode) {
           // In search mode, use the FULL price as the main price if available
           // This ensures consistency with non-search mode which filters by unit type
-          // If no full price, use partial price; if neither, fall back to latest price
+          // If no full price, use partial price; if neither, price stays 0
           if (fullPrice && fullPrice > 0) {
             price = fullPrice;
             console.log(`   💰 Using FULL price for ${distributorName}|${ndc}: ${price}`);
@@ -1065,29 +1053,42 @@ export const getOptimizationRecommendations = async (
             price = partialPrice;
             console.log(`   💰 Using PARTIAL price for ${distributorName}|${ndc}: ${price} (no full price available)`);
           } else {
-            // Fallback to latest price map (shouldn't happen in practice)
-            const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
-            price = latestPrice !== undefined ? latestPrice : data.totalPrice / data.count;
-            console.log(`   ⚠️ No full/partial price found, using fallback for ${distributorName}|${ndc}: ${price}`);
+            price = 0;
+            console.log(`   ⚠️ No full/partial price found for ${distributorName}|${ndc}`);
           }
         } else {
-          // Non-search mode: use latest price per distributor-NDC combination
-          // (already filtered by unit type during data collection)
-          const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
+          // Non-search mode: STRICT matching based on inventory item's unit type
+          // If inventory has full > 0, ONLY use fullPrice (don't fallback to anything else)
+          // If inventory has partial > 0, ONLY use partialPrice (don't fallback to anything else)
+          // This ensures that if no matching return_report records exist, there's NO recommended distributor
           
-          if (latestPrice !== undefined) {
-            price = latestPrice;
+          if (needsFullPrice) {
+            // Inventory item has full units - ONLY use full price
+            if (fullPrice > 0) {
+              price = fullPrice;
+              console.log(`   💰 Using FULL price for full-unit item ${distributorName}|${ndc}: ${price}`);
+            } else {
+              price = 0; // No full price record exists - this distributor won't be recommended
+              console.log(`   ❌ No FULL price for ${distributorName}|${ndc} - distributor not available for full units`);
+            }
+          } else if (needsPartialPrice) {
+            // Inventory item has partial units - ONLY use partial price
+            if (partialPrice > 0) {
+              price = partialPrice;
+              console.log(`   💰 Using PARTIAL price for partial-unit item ${distributorName}|${ndc}: ${price}`);
+            } else {
+              price = 0; // No partial price record exists - this distributor won't be recommended
+              console.log(`   ❌ No PARTIAL price for ${distributorName}|${ndc} - distributor not available for partial units`);
+            }
           } else {
-            // Fallback to average if latest not found (shouldn't happen, but safety fallback)
-            price = data.totalPrice / data.count;
-            console.log(`   ⚠️ Latest price not found for ${distributorName}|${ndc}, using average: ${price}`);
-            console.log(`   🔍 Available keys in latestPriceMap:`, Object.keys(distributorNdcToLatestPriceMap).filter(k => k.includes(distributorName) || k.includes(ndc)));
+            // Edge case: item has neither full nor partial? Use latest price as fallback
+            const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
+            price = latestPrice !== undefined ? latestPrice : 0;
+            console.log(`   ⚠️ Item has no full/partial units, using fallback price: ${price}`);
           }
         }
         
-        if (isSearchMode) {
-          console.log(`   💰 ${distributorName}|${ndc}: price=${price}, fullPrice=${fullPrice}, partialPrice=${partialPrice}`);
-        }
+        console.log(`   💰 ${distributorName}|${ndc}: price=${price}, fullPrice=${fullPrice}, partialPrice=${partialPrice}, needsFullPrice=${needsFullPrice}, needsPartialPrice=${needsPartialPrice}`);
         
         return {
           name: distributorName,
@@ -1095,7 +1096,9 @@ export const getOptimizationRecommendations = async (
           fullPrice,
           partialPrice,
         };
-      });
+      })
+      // Filter out distributors with price 0 (no matching unit type records)
+      .filter(d => d.price > 0);
     
     // Debug: Log all distributor averages
     console.log(`📊 Distributor averages for NDC ${ndc}:`, distributorAverages.map(d => `${d.name}: ${d.price}`).join(', '));
