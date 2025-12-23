@@ -333,12 +333,11 @@ BEGIN
       'pricePerUnit', cpi.price_per_unit,
       'totalValue', cpi.total_value,
       'createdAt', cpi.created_at
-    )
+    ) ORDER BY cpi.created_at
   )
   INTO v_items_result
   FROM custom_package_items cpi
-  WHERE cpi.package_id = p_package_id
-  ORDER BY cpi.created_at;
+  WHERE cpi.package_id = p_package_id;
 
   -- Step 11: Build and return the result
   v_result := jsonb_build_object(

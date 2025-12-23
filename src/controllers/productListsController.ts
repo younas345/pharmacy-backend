@@ -112,9 +112,14 @@ export const updateProductListItemHandler = catchAsync(
 // Remove item from product list
 export const removeItemHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId;
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
     const { id } = req.params;
 
-    await removeItemFromProductList(id);
+    await removeItemFromProductList(id, pharmacyId);
 
     res.status(200).json({
       status: 'success',

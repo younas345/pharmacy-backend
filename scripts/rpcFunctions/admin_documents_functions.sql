@@ -3,18 +3,16 @@
 -- Used by: /api/admin/documents endpoints
 -- ============================================================
 -- Functions:
--- 1. get_admin_documents_list - List documents with search/filter/pagination
+-- 1. get_admin_documents_list - List documents with search/filter/pagination AND stats
 -- 2. get_admin_document_by_id - Get single document details
 -- 3. delete_admin_document - Delete a document
--- 4. get_admin_documents_stats - Get document statistics
 -- ============================================================
 
 -- ============================================================
 -- FUNCTION 1: get_admin_documents_list
 -- ============================================================
--- Lists all documents with search, filter, pagination
--- Joins with pharmacy table to get pharmacy name
--- Returns: documents array and total count
+-- Lists all documents with search, filter, pagination AND stats
+-- Stats are included in the response (merged from stats function)
 -- ============================================================
 
 DROP FUNCTION IF EXISTS get_admin_documents_list(TEXT, UUID, INTEGER, INTEGER);
@@ -35,6 +33,13 @@ DECLARE
     v_total_count INTEGER;
     v_offset INTEGER;
     v_normalized_search TEXT;
+    -- Stats variables (global, not affected by search/filter)
+    v_stats_total_documents INTEGER;
+    v_stats_total_size BIGINT;
+    v_stats_total_credit NUMERIC;
+    v_stats_by_status JSONB;
+    v_stats_by_source JSONB;
+    v_stats_recent_uploads INTEGER;
 BEGIN
     -- Normalize search parameter: trim whitespace and handle empty strings
     IF p_search IS NOT NULL THEN
@@ -50,7 +55,36 @@ BEGIN
     -- Calculate offset
     v_offset := (p_page - 1) * p_limit;
     
-    -- Get total count with filters
+    -- Get GLOBAL stats (not affected by search/filter)
+    SELECT COUNT(*)::INTEGER INTO v_stats_total_documents FROM uploaded_documents;
+    SELECT COALESCE(SUM(file_size), 0)::BIGINT INTO v_stats_total_size FROM uploaded_documents;
+    SELECT COALESCE(SUM(total_credit_amount), 0)::NUMERIC INTO v_stats_total_credit 
+    FROM uploaded_documents WHERE total_credit_amount IS NOT NULL;
+    
+    -- Get counts by status
+    SELECT COALESCE(jsonb_object_agg(status, cnt), '{}'::JSONB)
+    INTO v_stats_by_status
+    FROM (
+        SELECT status, COUNT(*)::INTEGER as cnt
+        FROM uploaded_documents
+        GROUP BY status
+    ) s;
+    
+    -- Get counts by source
+    SELECT COALESCE(jsonb_object_agg(source, cnt), '{}'::JSONB)
+    INTO v_stats_by_source
+    FROM (
+        SELECT source, COUNT(*)::INTEGER as cnt
+        FROM uploaded_documents
+        GROUP BY source
+    ) s;
+    
+    -- Get uploads in last 7 days
+    SELECT COUNT(*)::INTEGER INTO v_stats_recent_uploads
+    FROM uploaded_documents
+    WHERE uploaded_at >= NOW() - INTERVAL '7 days';
+    
+    -- Get total count with filters (for pagination)
     SELECT COUNT(*)::INTEGER
     INTO v_total_count
     FROM uploaded_documents ud
@@ -140,7 +174,7 @@ BEGIN
     INTO v_documents
     FROM document_data dd;
     
-    -- Build result
+    -- Build result with stats included
     v_result := jsonb_build_object(
         'documents', v_documents,
         'pagination', jsonb_build_object(
@@ -152,6 +186,14 @@ BEGIN
         'filters', jsonb_build_object(
             'search', v_normalized_search,
             'pharmacyId', p_pharmacy_id
+        ),
+        'stats', jsonb_build_object(
+            'totalDocuments', v_stats_total_documents,
+            'totalFileSize', v_stats_total_size,
+            'totalCreditAmount', v_stats_total_credit,
+            'byStatus', v_stats_by_status,
+            'bySource', v_stats_by_source,
+            'recentUploads', v_stats_recent_uploads
         ),
         'generatedAt', NOW()
     );
@@ -212,7 +254,7 @@ BEGIN
         'pharmacyName', p.pharmacy_name,
         'pharmacyOwner', p.name,
         'pharmacyEmail', p.email,
-        'pharmacyPhone', COALESCE(p.phone, p.contact_phone),
+        'pharmacyPhone', p.phone,
         'reverseDistributorId', ud.reverse_distributor_id,
         'reverseDistributorName', rd.name,
         'reverseDistributorCode', rd.code
@@ -292,76 +334,6 @@ END;
 $$;
 
 -- ============================================================
--- FUNCTION 4: get_admin_documents_stats
--- ============================================================
--- Get document statistics (total count, by status)
--- ============================================================
-
-DROP FUNCTION IF EXISTS get_admin_documents_stats();
-
-CREATE OR REPLACE FUNCTION get_admin_documents_stats()
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    v_result JSONB;
-    v_total_count INTEGER;
-    v_total_size BIGINT;
-    v_total_credit NUMERIC;
-    v_by_status JSONB;
-    v_by_source JSONB;
-    v_recent_uploads INTEGER;
-BEGIN
-    -- Get total count
-    SELECT COUNT(*)::INTEGER INTO v_total_count FROM uploaded_documents;
-    
-    -- Get total file size
-    SELECT COALESCE(SUM(file_size), 0)::BIGINT INTO v_total_size FROM uploaded_documents;
-    
-    -- Get total credit amount
-    SELECT COALESCE(SUM(total_credit_amount), 0)::NUMERIC INTO v_total_credit 
-    FROM uploaded_documents WHERE total_credit_amount IS NOT NULL;
-    
-    -- Get counts by status
-    SELECT COALESCE(jsonb_object_agg(status, cnt), '{}'::JSONB)
-    INTO v_by_status
-    FROM (
-        SELECT status, COUNT(*)::INTEGER as cnt
-        FROM uploaded_documents
-        GROUP BY status
-    ) s;
-    
-    -- Get counts by source
-    SELECT COALESCE(jsonb_object_agg(source, cnt), '{}'::JSONB)
-    INTO v_by_source
-    FROM (
-        SELECT source, COUNT(*)::INTEGER as cnt
-        FROM uploaded_documents
-        GROUP BY source
-    ) s;
-    
-    -- Get uploads in last 7 days
-    SELECT COUNT(*)::INTEGER INTO v_recent_uploads
-    FROM uploaded_documents
-    WHERE uploaded_at >= NOW() - INTERVAL '7 days';
-    
-    -- Build result
-    v_result := jsonb_build_object(
-        'totalDocuments', v_total_count,
-        'totalFileSize', v_total_size,
-        'totalCreditAmount', v_total_credit,
-        'byStatus', v_by_status,
-        'bySource', v_by_source,
-        'recentUploads', v_recent_uploads,
-        'generatedAt', NOW()
-    );
-    
-    RETURN v_result;
-END;
-$$;
-
--- ============================================================
 -- Grant Permissions
 -- ============================================================
 
@@ -374,13 +346,10 @@ GRANT EXECUTE ON FUNCTION get_admin_document_by_id(UUID) TO service_role;
 GRANT EXECUTE ON FUNCTION delete_admin_document(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION delete_admin_document(UUID) TO service_role;
 
-GRANT EXECUTE ON FUNCTION get_admin_documents_stats() TO authenticated;
-GRANT EXECUTE ON FUNCTION get_admin_documents_stats() TO service_role;
-
 -- ============================================================
 -- Example Usage:
 -- ============================================================
--- List all documents:
+-- List all documents (includes stats):
 -- SELECT get_admin_documents_list();
 --
 -- Search documents:
@@ -394,7 +363,3 @@ GRANT EXECUTE ON FUNCTION get_admin_documents_stats() TO service_role;
 --
 -- Delete document:
 -- SELECT delete_admin_document('document-uuid-here'::UUID);
---
--- Get stats:
--- SELECT get_admin_documents_stats();
-

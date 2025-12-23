@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 import {
-  getDistributorsStats,
   getDistributorsList,
   getDistributorById,
   createDistributor,
@@ -11,28 +10,7 @@ import {
 import { AppError } from '../utils/appError';
 
 /**
- * Get distributor stats for dashboard
- * GET /api/admin/distributors/stats
- */
-export const getDistributorsStatsHandler = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const result = await getDistributorsStats();
-
-    res.status(200).json({
-      status: 'success',
-      data: result,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Get list of distributors
+ * Get list of distributors with stats included
  * GET /api/admin/distributors
  */
 export const getDistributorsHandler = async (
@@ -309,4 +287,3 @@ export const deleteDistributorHandler = async (
     next(error);
   }
 };
-

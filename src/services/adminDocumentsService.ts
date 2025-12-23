@@ -40,6 +40,15 @@ export interface PaginationInfo {
   totalPages: number;
 }
 
+export interface DocumentsStats {
+  totalDocuments: number;
+  totalFileSize: number;
+  totalCreditAmount: number;
+  byStatus: Record<string, number>;
+  bySource: Record<string, number>;
+  recentUploads: number;
+}
+
 export interface DocumentsListResponse {
   documents: DocumentListItem[];
   pagination: PaginationInfo;
@@ -47,21 +56,12 @@ export interface DocumentsListResponse {
     search: string | null;
     pharmacyId: string | null;
   };
+  stats: DocumentsStats;
   generatedAt: string;
 }
 
 export interface DocumentDetailsResponse {
   document: DocumentDetails;
-  generatedAt: string;
-}
-
-export interface DocumentsStatsResponse {
-  totalDocuments: number;
-  totalFileSize: number;
-  totalCreditAmount: number;
-  byStatus: Record<string, number>;
-  bySource: Record<string, number>;
-  recentUploads: number;
   generatedAt: string;
 }
 
@@ -81,8 +81,9 @@ export interface DeleteDocumentResponse {
 // ============================================================
 
 /**
- * Get list of documents with search, filter, and pagination
+ * Get list of documents with search, filter, pagination AND stats
  * Uses PostgreSQL RPC function - no custom JS logic
+ * Stats are included in the response
  */
 export const getDocumentsList = async (
   search?: string,
@@ -93,8 +94,6 @@ export const getDocumentsList = async (
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
-
-  console.log(`📄 Fetching documents list (search: ${search || 'none'}, pharmacyId: ${pharmacyId || 'all'}, page: ${page})`);
 
   const { data, error } = await supabaseAdmin.rpc('get_admin_documents_list', {
     p_search: search || null,
@@ -111,12 +110,11 @@ export const getDocumentsList = async (
     throw new AppError('No data returned from documents list', 500);
   }
 
-  console.log(`✅ Found ${data.pagination?.total || 0} documents`);
-
   return {
     documents: data.documents || [],
     pagination: data.pagination,
     filters: data.filters,
+    stats: data.stats,
     generatedAt: data.generatedAt,
   };
 };
@@ -131,8 +129,6 @@ export const getDocumentById = async (
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
-
-  console.log(`🔍 Fetching document details for ID: ${documentId}`);
 
   const { data, error } = await supabaseAdmin.rpc('get_admin_document_by_id', {
     p_document_id: documentId,
@@ -151,8 +147,6 @@ export const getDocumentById = async (
     throw new AppError(data.message || 'Document not found', data.code || 404);
   }
 
-  console.log(`✅ Document found: ${data.document?.fileName}`);
-
   return {
     document: data.document,
     generatedAt: data.generatedAt,
@@ -169,8 +163,6 @@ export const deleteDocument = async (
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
-
-  console.log(`🗑️ Deleting document: ${documentId}`);
 
   const { data, error } = await supabaseAdmin.rpc('delete_admin_document', {
     p_document_id: documentId,
@@ -189,8 +181,6 @@ export const deleteDocument = async (
     throw new AppError(data.message || 'Failed to delete document', data.code || 400);
   }
 
-  console.log(`✅ Document deleted: ${data.deletedDocument?.fileName}`);
-
   return {
     success: data.success,
     message: data.message,
@@ -198,38 +188,3 @@ export const deleteDocument = async (
     deletedAt: data.deletedAt,
   };
 };
-
-/**
- * Get document statistics
- * Uses PostgreSQL RPC function - no custom JS logic
- */
-export const getDocumentsStats = async (): Promise<DocumentsStatsResponse> => {
-  if (!supabaseAdmin) {
-    throw new AppError('Supabase admin client not configured', 500);
-  }
-
-  console.log(`📊 Fetching documents statistics`);
-
-  const { data, error } = await supabaseAdmin.rpc('get_admin_documents_stats');
-
-  if (error) {
-    throw new AppError(`Failed to fetch documents stats: ${error.message}`, 400);
-  }
-
-  if (!data) {
-    throw new AppError('No data returned from documents stats', 500);
-  }
-
-  console.log(`✅ Stats fetched: ${data.totalDocuments} total documents`);
-
-  return {
-    totalDocuments: data.totalDocuments,
-    totalFileSize: data.totalFileSize,
-    totalCreditAmount: data.totalCreditAmount,
-    byStatus: data.byStatus || {},
-    bySource: data.bySource || {},
-    recentUploads: data.recentUploads,
-    generatedAt: data.generatedAt,
-  };
-};
-
