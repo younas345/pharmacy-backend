@@ -844,207 +844,72 @@ export interface AddItemsToPackageRequest {
   items: CustomPackageItem[];
 }
 
-// Add items to an existing custom package
+// Response type for add items RPC
+export interface AddItemsResponse extends CustomPackage {
+  itemsAdded: number;
+  itemsUpdated: number;
+}
+
+// Add items to an existing custom package using RPC function
+// If product_id exists, increments quantities. If new, inserts as new item.
 export const addItemsToCustomPackage = async (
   pharmacyId: string,
   packageId: string,
   itemsData: AddItemsToPackageRequest
-): Promise<CustomPackage> => {
+): Promise<AddItemsResponse> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
 
-  const db = supabaseAdmin;
-
-  // Check if package exists and belongs to pharmacy
-  const { data: packageRecord, error: checkError } = await db
-    .from('custom_packages')
-    .select('*')
-    .eq('id', packageId)
-    .eq('pharmacy_id', pharmacyId)
-    .single();
-
-  if (checkError || !packageRecord) {
-    throw new AppError('Package not found or you do not have permission to update it', 404);
-  }
-
-  // Check if package is already delivered (status = true)
-  if (packageRecord.status === true) {
-    throw new AppError('Cannot add items to a delivered package. Only non-delivered packages can be updated.', 400);
-  }
-
-  // Validate items
-  if (!itemsData.items || itemsData.items.length === 0) {
-    throw new AppError('At least one item is required', 400);
-  }
-
-  // Validate and normalize new items
-  const normalizedNewItems = itemsData.items.map((item: any) => {
-    const fullValue = typeof item.full === 'number' ? item.full : 0;
-    const partialValue = typeof item.partial === 'number' ? item.partial : 0;
-
-    const normalizedItem = {
-      ndc: item.ndc,
-      productId: item.productId || item.product_id || null,
-      productName: item.productName || item.product_name || '',
-      full: fullValue,
-      partial: partialValue,
-      pricePerUnit: item.pricePerUnit || item.price_per_unit || 0,
-      totalValue: item.totalValue || item.total_value || 0,
-    };
-
-    // Validate required fields
-    if (!normalizedItem.ndc) {
-      throw new AppError('NDC is required for all items', 400);
-    }
-    if (!normalizedItem.productName) {
-      throw new AppError('Product name is required for all items', 400);
-    }
-    if (normalizedItem.full < 0) {
-      throw new AppError('Full units cannot be negative', 400);
-    }
-    if (normalizedItem.partial < 0) {
-      throw new AppError('Partial units cannot be negative', 400);
-    }
-    if (normalizedItem.full === 0 && normalizedItem.partial === 0) {
-      throw new AppError('At least one of full or partial must be greater than 0 for all items', 400);
-    }
-    if (normalizedItem.pricePerUnit < 0) {
-      throw new AppError('Price per unit must be greater than or equal to 0', 400);
-    }
-    if (normalizedItem.totalValue < 0) {
-      throw new AppError('Total value must be greater than or equal to 0', 400);
-    }
-
-    return normalizedItem;
+  const { data, error } = await supabaseAdmin.rpc('add_items_to_custom_package', {
+    p_pharmacy_id: pharmacyId,
+    p_package_id: packageId,
+    p_items: itemsData.items
   });
 
-  // Apply existing package fee rate discount to new items
-  const existingFeeRate = Number(packageRecord.fee_rate) || 0;
-  const discountMultiplier = existingFeeRate > 0 ? (100 - existingFeeRate) / 100 : 1;
-  
-  const discountedNewItems = normalizedNewItems.map(item => ({
-    ...item,
-    totalValue: Math.round(item.totalValue * discountMultiplier * 100) / 100 // Apply discount
-  }));
-
-  // Insert new items with discounted values
-  const newPackageItems = discountedNewItems.map((item) => ({
-    package_id: packageId,
-    ndc: item.ndc,
-    product_id: item.productId || null,
-    product_name: item.productName,
-    full: item.full,
-    partial: item.partial,
-    price_per_unit: item.pricePerUnit,
-    total_value: item.totalValue, // This is now the discounted total value
-  }));
-
-  const { error: itemsError } = await db.from('custom_package_items').insert(newPackageItems);
-
-  if (itemsError) {
-    throw new AppError(`Failed to add items to package: ${itemsError.message}`, 400);
+  if (error) {
+    throw new AppError(`Failed to add items to package: ${error.message}`, 400);
   }
 
-  // Fetch all items for this package (existing + new)
-  const { data: allItems, error: fetchItemsError } = await db
-    .from('custom_package_items')
-    .select('*')
-    .eq('package_id', packageId);
-
-  if (fetchItemsError) {
-    throw new AppError(`Failed to fetch package items: ${fetchItemsError.message}`, 400);
+  if (!data || !data.success) {
+    throw new AppError(data?.error || 'Failed to add items to package', 400);
   }
 
-  // Calculate new totals (items already have discounted values)
-  const totalItems = (allItems || []).reduce((sum, item: any) => sum + (item.full || 0) + (item.partial || 0), 0);
-  const totalEstimatedValue = (allItems || []).reduce((sum, item: any) => sum + (Number(item.total_value) || 0), 0);
-
-  // Calculate fee amount based on what the original total would have been (reuse existingFeeRate from above)
-  const originalTotal = existingFeeRate > 0 ? totalEstimatedValue / ((100 - existingFeeRate) / 100) : totalEstimatedValue;
-  const newFeeAmount = originalTotal - totalEstimatedValue; // Discount amount already applied
-  const newNetEstimatedValue = totalEstimatedValue; // Same as total since discount already applied
-
-  // Update package totals
-  const { data: updatedPackage, error: updateError } = await db
-    .from('custom_packages')
-    .update({
-      total_items: totalItems,
-      total_estimated_value: totalEstimatedValue,
-      fee_amount: Math.round(newFeeAmount * 100) / 100,
-      net_estimated_value: Math.round(newNetEstimatedValue * 100) / 100,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', packageId)
-    .eq('pharmacy_id', pharmacyId)
-    .select()
-    .single();
-
-  if (updateError) {
-    throw new AppError(`Failed to update package totals: ${updateError.message}`, 400);
-  }
-
-  // Get distributor contact info if distributor_id exists
-  let distributorContact: CustomPackage['distributorContact'] | undefined;
-  if (updatedPackage.distributor_id) {
-    const { data: distributor, error: distError } = await db
-      .from('reverse_distributors')
-      .select('id, name, contact_email, contact_phone, address')
-      .eq('id', updatedPackage.distributor_id)
-      .single();
-
-    if (!distError && distributor) {
-      let location: string | undefined;
-      if (distributor.address) {
-        const addr = distributor.address;
-        const locationParts: string[] = [];
-
-        if (addr.street) locationParts.push(addr.street);
-        if (addr.city) locationParts.push(addr.city);
-        if (addr.state) locationParts.push(addr.state);
-        if (addr.zipCode) locationParts.push(addr.zipCode);
-        if (addr.country) locationParts.push(addr.country);
-
-        if (locationParts.length > 0) {
-          location = locationParts.join(', ');
-        }
-      }
-
-      distributorContact = {
-        email: distributor.contact_email || undefined,
-        phone: distributor.contact_phone || undefined,
-        location,
-      };
-    }
-  }
-
+  // Map RPC response to CustomPackage format
+  const result = data.data;
   return {
-    id: updatedPackage.id,
-    packageNumber: updatedPackage.package_number,
-    pharmacyId: updatedPackage.pharmacy_id,
-    distributorName: updatedPackage.distributor_name,
-    distributorId: updatedPackage.distributor_id || undefined,
-    distributorContact,
-    items: (allItems || []).map((item: any) => ({
+    id: result.id,
+    packageNumber: result.packageNumber,
+    pharmacyId: result.pharmacyId,
+    distributorName: result.distributorName,
+    distributorId: result.distributorId || undefined,
+    distributorContact: result.distributorContact ? {
+      email: result.distributorContact.email || undefined,
+      phone: result.distributorContact.phone || undefined,
+      location: result.distributorContact.location || undefined,
+    } : undefined,
+    items: (result.items || []).map((item: any) => ({
       id: item.id,
       ndc: item.ndc,
-      productId: item.product_id || undefined,
-      productName: item.product_name,
+      productId: item.productId || undefined,
+      productName: item.productName,
       full: item.full || 0,
       partial: item.partial || 0,
-      pricePerUnit: item.price_per_unit,
-      totalValue: item.total_value,
+      pricePerUnit: item.pricePerUnit,
+      totalValue: item.totalValue,
     })),
-    totalItems: updatedPackage.total_items,
-    totalEstimatedValue: Math.round(updatedPackage.total_estimated_value * 100) / 100,
-    feeRate: updatedPackage.fee_rate || undefined,
-    feeDuration: updatedPackage.fee_duration || undefined,
-    feeAmount: updatedPackage.fee_amount ? Math.round(updatedPackage.fee_amount * 100) / 100 : undefined,
-    netEstimatedValue: updatedPackage.net_estimated_value ? Math.round(updatedPackage.net_estimated_value * 100) / 100 : undefined,
-    notes: updatedPackage.notes || undefined,
-    status: updatedPackage.status,
-    createdAt: updatedPackage.created_at,
-    updatedAt: updatedPackage.updated_at,
+    totalItems: result.totalItems,
+    totalEstimatedValue: result.totalEstimatedValue,
+    feeRate: result.feeRate || undefined,
+    feeDuration: result.feeDuration || undefined,
+    feeAmount: result.feeAmount || undefined,
+    netEstimatedValue: result.netEstimatedValue || undefined,
+    notes: result.notes || undefined,
+    status: result.status,
+    createdAt: result.createdAt,
+    updatedAt: result.updatedAt,
+    itemsAdded: data.itemsAdded,
+    itemsUpdated: data.itemsUpdated,
   };
 };
 

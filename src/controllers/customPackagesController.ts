@@ -162,6 +162,7 @@ export const updatePackageStatusHandler = catchAsync(
 );
 
 // Add items to an existing custom package
+// Uses RPC function - if product_id exists, increments quantities; if new, inserts
 export const addItemsToPackageHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const pharmacyId = req.pharmacyId;
@@ -181,12 +182,17 @@ export const addItemsToPackageHandler = catchAsync(
       throw new AppError('Items array is required and cannot be empty', 400);
     }
 
-    const updatedPackage = await addItemsToCustomPackage(pharmacyId, packageId, { items });
+    const result = await addItemsToCustomPackage(pharmacyId, packageId, { items });
+
+    // Extract itemsAdded and itemsUpdated from result
+    const { itemsAdded, itemsUpdated, ...updatedPackage } = result;
 
     res.status(200).json({
       status: 'success',
       data: updatedPackage,
-      message: `${items.length} item(s) added to package successfully`,
+      message: `${itemsAdded} item(s) added, ${itemsUpdated} item(s) updated`,
+      itemsAdded,
+      itemsUpdated,
     });
   }
 );
