@@ -3,12 +3,12 @@ import {
   getPaymentsListHandler,
   getPaymentByIdHandler,
 } from '../controllers/adminPaymentsController';
-import { authenticate } from '../middleware/auth';
+import { authenticateAdmin } from '../middleware/adminAuth';
 
 const router = Router();
 
-// Apply authentication middleware to all routes
-router.use(authenticate);
+// Apply admin authentication middleware to all routes
+router.use(authenticateAdmin);
 
 /**
  * @swagger

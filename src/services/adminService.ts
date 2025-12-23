@@ -122,10 +122,18 @@ export const verifyAdminToken = async (token: string): Promise<{
   type: string;
 }> => {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    // Step 1: Verify JWT signature and expiration
+    let decoded: any;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (jwtError: any) {
+      console.error('[AdminAuth] JWT verification failed:', jwtError.message);
+      throw new AppError(`Token verification failed: ${jwtError.message}`, 401);
+    }
 
     // Check if token is for admin
     if (decoded.type !== 'admin') {
+      console.error('[AdminAuth] Token type mismatch:', decoded.type);
       throw new AppError('Invalid token type', 401);
     }
 
@@ -140,7 +148,13 @@ export const verifyAdminToken = async (token: string): Promise<{
       .eq('id', decoded.id)
       .single();
 
-    if (adminError || !adminData) {
+    if (adminError) {
+      console.error('[AdminAuth] Database error:', adminError.message, adminError.code);
+      throw new AppError(`Database error: ${adminError.message}`, 500);
+    }
+
+    if (!adminData) {
+      console.error('[AdminAuth] Admin not found for ID:', decoded.id);
       throw new AppError('Admin not found', 404);
     }
 
@@ -159,6 +173,7 @@ export const verifyAdminToken = async (token: string): Promise<{
     if (error instanceof AppError) {
       throw error;
     }
+    console.error('[AdminAuth] Unexpected error:', error.message);
     throw new AppError('Invalid or expired token', 401);
   }
 };

@@ -110,7 +110,8 @@ export const authenticate = async (
 
     // Step 1: Verify the JWT token
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-
+    console.log('user', user);
+    console.log('authError', authError);
     if (authError || !user) {
       throw new AppError('Invalid or expired token', 401);
     }
