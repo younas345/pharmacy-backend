@@ -2028,7 +2028,7 @@ export const getReturnReportsByDistributorAndNdc = async (
     .select('id, document_id, pharmacy_id, data, created_at')
     .in('document_id', documentIds)
     .or(orConditions.join(','));
-  
+
   console.log(`📊 Found ${returnReports?.length || 0} matching return reports for NDC: ${ndcCode}`);
 
   if (error) {
