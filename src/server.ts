@@ -21,6 +21,7 @@ import adminPharmaciesRoutes from './routes/adminPharmaciesRoutes';
 import adminDistributorsRoutes from './routes/adminDistributorsRoutes';
 import adminDocumentsRoutes from './routes/adminDocumentsRoutes';
 import adminPaymentsRoutes from './routes/adminPaymentsRoutes';
+import adminAnalyticsRoutes from './routes/adminAnalyticsRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
@@ -123,6 +124,7 @@ app.use('/api/admin/pharmacies', adminPharmaciesRoutes);
 app.use('/api/admin/distributors', adminDistributorsRoutes);
 app.use('/api/admin/documents', adminDocumentsRoutes);
 app.use('/api/admin/payments', adminPaymentsRoutes);
+app.use('/api/admin/analytics', adminAnalyticsRoutes);
 
 /**
  * @swagger
