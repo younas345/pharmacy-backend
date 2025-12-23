@@ -3207,3 +3207,54 @@ export const getPackageSuggestionsByNdcs = async (
   };
 };
 
+// Interface for distributor package suggestion input item
+export interface DistributorPackageItem {
+  ndc: string;
+  productId?: string;
+  productName?: string;
+  full?: number;
+  partial?: number;
+}
+
+// Interface for distributor package suggestion response
+export interface DistributorPackageSuggestionResponse {
+  packages: PackageSuggestionWithStatus[];
+  totalProducts: number;
+  totalPackages: number;
+  totalEstimatedValue: number;
+  generatedAt: string;
+  summary: {
+    productsWithPricing: number;
+    productsWithoutPricing: number;
+    distributorsUsed: number;
+    packagesAlreadyCreated: number;
+  };
+}
+
+// Get package suggestion for a specific distributor using RPC function
+export const getDistributorPackageSuggestion = async (
+  pharmacyId: string,
+  distributorId: string,
+  items: DistributorPackageItem[]
+): Promise<DistributorPackageSuggestionResponse> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('get_distributor_package_suggestion', {
+    p_pharmacy_id: pharmacyId,
+    p_distributor_id: distributorId,
+    p_items: items
+  });
+
+  if (error) {
+    throw new AppError(`Failed to get distributor package suggestion: ${error.message}`, 400);
+  }
+
+  if (!data || !data.success) {
+    throw new AppError(data?.error || 'Failed to get distributor package suggestion', 400);
+  }
+
+  return data.data as DistributorPackageSuggestionResponse;
+};
+

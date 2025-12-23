@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { getOptimizationRecommendations, getPackageRecommendations, getPackageRecommendationsByNdcs, getDistributorSuggestionsByNdc, getDistributorSuggestionsByMultipleNdcs, getPackageSuggestionsByNdcs } from '../services/optimizationService';
+import { getOptimizationRecommendations, getPackageRecommendations, getPackageRecommendationsByNdcs, getDistributorSuggestionsByNdc, getDistributorSuggestionsByMultipleNdcs, getPackageSuggestionsByNdcs, getDistributorPackageSuggestion } from '../services/optimizationService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
 
@@ -221,6 +221,64 @@ export const getPackageSuggestionsByNdcsHandler = catchAsync(
     res.status(200).json({
       status: 'success',
       data: suggestions,
+    });
+  }
+);
+
+// Get package suggestion for a specific distributor (using RPC function)
+export const getDistributorPackageSuggestionHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId;
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
+    const { distributorId, items } = req.body;
+
+    // Validate distributor ID
+    if (!distributorId) {
+      throw new AppError('Distributor ID is required in request body', 400);
+    }
+
+    // Validate items array
+    if (!items || !Array.isArray(items)) {
+      throw new AppError('Items array is required in request body', 400);
+    }
+
+    if (items.length === 0) {
+      throw new AppError('Items array cannot be empty', 400);
+    }
+
+    // Validate each item - basic validation only, rest is handled by RPC
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item.ndc) {
+        throw new AppError(`Item ${i + 1}: NDC is required`, 400);
+      }
+
+      const fullValue = typeof item.full === 'number' ? item.full : 0;
+      const partialValue = typeof item.partial === 'number' ? item.partial : 0;
+
+      if (fullValue < 0) {
+        throw new AppError(`Item ${i + 1}: Full units cannot be negative`, 400);
+      }
+      if (partialValue < 0) {
+        throw new AppError(`Item ${i + 1}: Partial units cannot be negative`, 400);
+      }
+      if (fullValue === 0 && partialValue === 0) {
+        throw new AppError(`Item ${i + 1}: At least one of full or partial must be greater than 0`, 400);
+      }
+
+      // Normalize the item
+      item.full = fullValue;
+      item.partial = partialValue;
+    }
+
+    const suggestion = await getDistributorPackageSuggestion(pharmacyId, distributorId, items);
+
+    res.status(200).json({
+      status: 'success',
+      data: suggestion,
     });
   }
 );

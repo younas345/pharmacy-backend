@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getOptimizationRecommendationsHandler, getPackageRecommendationsHandler, getPackageRecommendationsByNdcsHandler, getDistributorSuggestionsHandler, getPackageSuggestionsByNdcsHandler } from '../controllers/optimizationController';
+import { getOptimizationRecommendationsHandler, getPackageRecommendationsHandler, getPackageRecommendationsByNdcsHandler, getDistributorSuggestionsHandler, getPackageSuggestionsByNdcsHandler, getDistributorPackageSuggestionHandler } from '../controllers/optimizationController';
 import customPackagesRoutes from './customPackagesRoutes';
 import { authenticate } from '../middleware/auth';
 
@@ -358,6 +358,209 @@ router.get('/packages/by-ndc', getPackageRecommendationsByNdcsHandler);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/packages/suggestions', getPackageSuggestionsByNdcsHandler);
+
+/**
+ * @swagger
+ * /api/optimization/packages/distributor-suggestion:
+ *   post:
+ *     summary: Get package suggestion for a specific distributor
+ *     description: Get package suggestion for a specific distributor provided in the payload. Unlike /packages/suggestions which finds the best distributor, this API uses the distributor provided in the request. All pricing logic is handled by an RPC function with no JS loops or logic.
+ *     tags: [Optimization]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - distributorId
+ *               - items
+ *             properties:
+ *               distributorId:
+ *                 type: string
+ *                 format: uuid
+ *                 description: The UUID of the distributor to get pricing for
+ *                 example: "9b67ae57-b566-4819-9ec8-03df64965897"
+ *               items:
+ *                 type: array
+ *                 description: Array of NDC items with full and partial units
+ *                 minItems: 1
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - ndc
+ *                   properties:
+ *                     ndc:
+ *                       type: string
+ *                       description: NDC code of the product
+ *                       example: "00187-5115-60"
+ *                     productId:
+ *                       type: string
+ *                       description: Product ID from product_list_items (optional)
+ *                       example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *                     productName:
+ *                       type: string
+ *                       description: Product name (optional, fallback to database if not provided)
+ *                       example: "Aspirin 100mg Tablet"
+ *                     full:
+ *                       type: number
+ *                       description: Number of full units
+ *                       example: 2
+ *                       minimum: 0
+ *                       default: 0
+ *                     partial:
+ *                       type: number
+ *                       description: Number of partial units
+ *                       example: 1
+ *                       minimum: 0
+ *                       default: 0
+ *           examples:
+ *             singleItem:
+ *               summary: Single NDC with full units
+ *               value:
+ *                 distributorId: "9b67ae57-b566-4819-9ec8-03df64965897"
+ *                 items:
+ *                   - ndc: "00187-5115-60"
+ *                     productId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *                     productName: "Aspirin 100mg Tablet"
+ *                     full: 2
+ *                     partial: 0
+ *             multipleItems:
+ *               summary: Multiple NDCs with mixed units
+ *               value:
+ *                 distributorId: "9b67ae57-b566-4819-9ec8-03df64965897"
+ *                 items:
+ *                   - ndc: "00187-5115-60"
+ *                     full: 2
+ *                     partial: 1
+ *                   - ndc: "42385097801"
+ *                     full: 1
+ *                     partial: 0
+ *     responses:
+ *       200:
+ *         description: Package suggestion retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "success"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     packages:
+ *                       type: array
+ *                       description: Array containing single package suggestion for the specified distributor
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           distributorName:
+ *                             type: string
+ *                             example: "Return Solutions, Inc."
+ *                           distributorId:
+ *                             type: string
+ *                             example: "9b67ae57-b566-4819-9ec8-03df64965897"
+ *                           distributorContact:
+ *                             type: object
+ *                             properties:
+ *                               email:
+ *                                 type: string
+ *                                 nullable: true
+ *                               phone:
+ *                                 type: string
+ *                                 nullable: true
+ *                               location:
+ *                                 type: string
+ *                                 nullable: true
+ *                               feeRates:
+ *                                 type: object
+ *                                 nullable: true
+ *                           products:
+ *                             type: array
+ *                             items:
+ *                               type: object
+ *                               properties:
+ *                                 ndc:
+ *                                   type: string
+ *                                 productId:
+ *                                   type: string
+ *                                   nullable: true
+ *                                 productName:
+ *                                   type: string
+ *                                 full:
+ *                                   type: number
+ *                                 partial:
+ *                                   type: number
+ *                                 pricePerUnit:
+ *                                   type: number
+ *                                 totalValue:
+ *                                   type: number
+ *                           totalItems:
+ *                             type: number
+ *                           totalEstimatedValue:
+ *                             type: number
+ *                           averagePricePerUnit:
+ *                             type: number
+ *                           alreadyCreated:
+ *                             type: boolean
+ *                             description: Whether a non-delivered package already exists with this distributor
+ *                           existingPackage:
+ *                             type: object
+ *                             nullable: true
+ *                             properties:
+ *                               id:
+ *                                 type: string
+ *                               packageNumber:
+ *                                 type: string
+ *                               totalItems:
+ *                                 type: number
+ *                               totalEstimatedValue:
+ *                                 type: number
+ *                               feeRate:
+ *                                 type: number
+ *                                 nullable: true
+ *                               feeDuration:
+ *                                 type: number
+ *                                 nullable: true
+ *                               createdAt:
+ *                                 type: string
+ *                     totalProducts:
+ *                       type: number
+ *                     totalPackages:
+ *                       type: number
+ *                     totalEstimatedValue:
+ *                       type: number
+ *                     generatedAt:
+ *                       type: string
+ *                     summary:
+ *                       type: object
+ *                       properties:
+ *                         productsWithPricing:
+ *                           type: number
+ *                         productsWithoutPricing:
+ *                           type: number
+ *                         distributorsUsed:
+ *                           type: number
+ *                         packagesAlreadyCreated:
+ *                           type: number
+ *       400:
+ *         description: Bad request - Missing required fields or invalid data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: Unauthorized - Invalid or missing authentication token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/packages/distributor-suggestion', getDistributorPackageSuggestionHandler);
 
 /**
  * @swagger
