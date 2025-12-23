@@ -305,10 +305,16 @@ router.patch('/:id/mark-status', updatePackageStatusHandler);
  * @swagger
  * /api/optimization/custom-packages/{id}/add-items:
  *   patch:
- *     summary: Add items to an existing custom package
+ *     summary: Add or update items in an existing custom package
  *     description: |
- *       Adds new items to an existing custom package. Only non-delivered packages (status = false) can be updated.
- *       Each item is treated separately even if NDC is same as existing items.
+ *       Adds or updates items in an existing custom package. Only non-delivered packages (status = false) can be updated.
+ *       
+ *       **Upsert Behavior:**
+ *       - If an item with the same `productId` already exists in the package, the quantities (full/partial) are INCREMENTED
+ *       - If the `productId` is new (doesn't exist), the item is inserted as a new item
+ *       - If no `productId` is provided, the item is always inserted as new
+ *       
+ *       All logic is handled by an RPC function with no JavaScript loops.
  *     tags: [Optimization]
  *     security:
  *       - bearerAuth: []
@@ -332,13 +338,13 @@ router.patch('/:id/mark-status', updatePackageStatusHandler);
  *             properties:
  *               items:
  *                 type: array
- *                 description: Array of items to add to the package
+ *                 description: Array of items to add or update in the package
  *                 minItems: 1
  *                 items:
  *                   $ref: '#/components/schemas/CustomPackageItem'
  *           examples:
  *             addSingleItem:
- *               summary: Add single item
+ *               summary: Add single item (or update if productId exists)
  *               value:
  *                 items:
  *                   - ndc: "59746017110"
@@ -349,16 +355,18 @@ router.patch('/:id/mark-status', updatePackageStatusHandler);
  *                     pricePerUnit: 35.42
  *                     totalValue: 177.10
  *             addMultipleItems:
- *               summary: Add multiple items
+ *               summary: Add multiple items (updates existing productIds)
  *               value:
  *                 items:
  *                   - ndc: "59746017110"
+ *                     productId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
  *                     productName: "prednisone 1 MG Oral Tablet"
  *                     full: 2
  *                     partial: 0
  *                     pricePerUnit: 35.42
  *                     totalValue: 70.84
  *                   - ndc: "00187-5115-60"
+ *                     productId: "b2c3d4e5-f6a7-8901-bcde-f23456789012"
  *                     productName: "Aspirin 100mg"
  *                     full: 1
  *                     partial: 0
@@ -366,7 +374,7 @@ router.patch('/:id/mark-status', updatePackageStatusHandler);
  *                     totalValue: 50.00
  *     responses:
  *       200:
- *         description: Items added to package successfully
+ *         description: Items added/updated in package successfully
  *         content:
  *           application/json:
  *             schema:
@@ -379,7 +387,15 @@ router.patch('/:id/mark-status', updatePackageStatusHandler);
  *                   $ref: '#/components/schemas/CustomPackage'
  *                 message:
  *                   type: string
- *                   example: "2 item(s) added to package successfully"
+ *                   example: "1 item(s) added, 1 item(s) updated"
+ *                 itemsAdded:
+ *                   type: integer
+ *                   description: Number of new items inserted
+ *                   example: 1
+ *                 itemsUpdated:
+ *                   type: integer
+ *                   description: Number of existing items with quantities incremented
+ *                   example: 1
  *       400:
  *         description: Bad request - validation error, package is delivered, or missing required fields
  *         content:
