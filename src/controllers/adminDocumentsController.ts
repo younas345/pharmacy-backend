@@ -3,12 +3,11 @@ import {
   getDocumentsList,
   getDocumentById,
   deleteDocument,
-  getDocumentsStats,
 } from '../services/adminDocumentsService';
 import { AppError } from '../utils/appError';
 
 /**
- * Get list of documents
+ * Get list of documents with stats included
  * GET /api/admin/documents
  */
 export const getDocumentsHandler = async (
@@ -102,25 +101,3 @@ export const deleteDocumentHandler = async (
     next(error);
   }
 };
-
-/**
- * Get documents statistics
- * GET /api/admin/documents/stats
- */
-export const getDocumentsStatsHandler = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const result = await getDocumentsStats();
-
-    res.status(200).json({
-      status: 'success',
-      data: result,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-

@@ -1,6 +1,5 @@
 import express from 'express';
 import {
-  getDistributorsStatsHandler,
   getDistributorsHandler,
   getDistributorByIdHandler,
   createDistributorHandler,
@@ -34,9 +33,6 @@ router.use(authenticateAdmin);
  *         totalDeals:
  *           type: integer
  *           example: 45
- *         generatedAt:
- *           type: string
- *           format: date-time
  * 
  *     DistributorListItem:
  *       type: object
@@ -183,39 +179,12 @@ router.use(authenticateAdmin);
 
 /**
  * @swagger
- * /api/admin/distributors/stats:
- *   get:
- *     summary: Get distributor statistics
- *     description: Returns statistics for dashboard cards (total, active, inactive, total deals)
- *     tags: [Admin - Distributors]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Distributor statistics
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 data:
- *                   $ref: '#/components/schemas/DistributorStats'
- *       401:
- *         description: Unauthorized - Invalid or missing admin token
- *       500:
- *         description: Internal server error
- */
-router.get('/stats', getDistributorsStatsHandler);
-
-/**
- * @swagger
  * /api/admin/distributors:
  *   get:
- *     summary: Get list of distributors
- *     description: Returns paginated list of distributors with search and filter options
+ *     summary: Get list of distributors with stats
+ *     description: |
+ *       Returns paginated list of distributors with search and filter options.
+ *       **Stats are included in the response** (totalDistributors, activeDistributors, inactiveDistributors, totalDeals).
  *     tags: [Admin - Distributors]
  *     security:
  *       - bearerAuth: []
@@ -247,7 +216,7 @@ router.get('/stats', getDistributorsStatsHandler);
  *         description: Items per page (max 100)
  *     responses:
  *       200:
- *         description: List of distributors
+ *         description: List of distributors with stats
  *         content:
  *           application/json:
  *             schema:
@@ -282,6 +251,11 @@ router.get('/stats', getDistributorsStatsHandler);
  *                           nullable: true
  *                         status:
  *                           type: string
+ *                     stats:
+ *                       $ref: '#/components/schemas/DistributorStats'
+ *                     generatedAt:
+ *                       type: string
+ *                       format: date-time
  *       401:
  *         description: Unauthorized - Invalid or missing admin token
  *       500:
@@ -309,19 +283,6 @@ router.get('/', getDistributorsHandler);
  *     responses:
  *       200:
  *         description: Distributor details
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 data:
- *                   type: object
- *                   properties:
- *                     distributor:
- *                       $ref: '#/components/schemas/DistributorDetails'
  *       401:
  *         description: Unauthorized - Invalid or missing admin token
  *       404:
@@ -349,22 +310,6 @@ router.get('/:id', getDistributorByIdHandler);
  *     responses:
  *       201:
  *         description: Distributor created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 message:
- *                   type: string
- *                   example: Distributor created successfully
- *                 data:
- *                   type: object
- *                   properties:
- *                     distributor:
- *                       $ref: '#/components/schemas/DistributorDetails'
  *       400:
  *         description: Bad request - Invalid data
  *       401:
@@ -400,22 +345,6 @@ router.post('/', createDistributorHandler);
  *     responses:
  *       200:
  *         description: Distributor updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 message:
- *                   type: string
- *                   example: Distributor updated successfully
- *                 data:
- *                   type: object
- *                   properties:
- *                     distributor:
- *                       $ref: '#/components/schemas/DistributorDetails'
  *       400:
  *         description: Bad request - Invalid data
  *       401:
@@ -453,22 +382,6 @@ router.put('/:id', updateDistributorHandler);
  *     responses:
  *       200:
  *         description: Distributor status updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 message:
- *                   type: string
- *                   example: Distributor deactivated successfully
- *                 data:
- *                   type: object
- *                   properties:
- *                     distributor:
- *                       $ref: '#/components/schemas/DistributorDetails'
  *       400:
  *         description: Bad request - Invalid status
  *       401:
@@ -500,29 +413,6 @@ router.put('/:id/status', updateDistributorStatusHandler);
  *     responses:
  *       200:
  *         description: Distributor deleted successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: success
- *                 message:
- *                   type: string
- *                   example: Distributor "MediSupply Corp" deleted successfully
- *                 data:
- *                   type: object
- *                   properties:
- *                     success:
- *                       type: boolean
- *                       example: true
- *                     deletedId:
- *                       type: string
- *                       format: uuid
- *                     deletedAt:
- *                       type: string
- *                       format: date-time
  *       400:
  *         description: Bad request - Cannot delete distributor with existing deals
  *       401:
@@ -535,4 +425,3 @@ router.put('/:id/status', updateDistributorStatusHandler);
 router.delete('/:id', deleteDistributorHandler);
 
 export default router;
-

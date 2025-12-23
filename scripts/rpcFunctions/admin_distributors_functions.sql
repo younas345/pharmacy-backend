@@ -41,56 +41,9 @@ BEGIN
 END $$;
 
 -- ============================================================
--- 2. GET ADMIN DISTRIBUTORS STATS
--- Returns stats for dashboard cards
--- ============================================================
-
-DROP FUNCTION IF EXISTS get_admin_distributors_stats();
-
-CREATE OR REPLACE FUNCTION get_admin_distributors_stats()
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    v_result JSONB;
-    v_total_distributors INTEGER;
-    v_active_distributors INTEGER;
-    v_total_deals INTEGER;
-BEGIN
-    -- Get total distributors
-    SELECT COUNT(*)::INTEGER INTO v_total_distributors
-    FROM reverse_distributors;
-    
-    -- Get active distributors
-    SELECT COUNT(*)::INTEGER INTO v_active_distributors
-    FROM reverse_distributors
-    WHERE is_active = TRUE;
-    
-    -- Get total deals (custom_packages linked to distributors)
-    SELECT COUNT(*)::INTEGER INTO v_total_deals
-    FROM custom_packages
-    WHERE distributor_id IS NOT NULL;
-    
-    -- Build result
-    v_result := jsonb_build_object(
-        'totalDistributors', v_total_distributors,
-        'activeDistributors', v_active_distributors,
-        'inactiveDistributors', v_total_distributors - v_active_distributors,
-        'totalDeals', v_total_deals,
-        'generatedAt', NOW()
-    );
-    
-    RETURN v_result;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION get_admin_distributors_stats() TO authenticated;
-GRANT EXECUTE ON FUNCTION get_admin_distributors_stats() TO service_role;
-
--- ============================================================
--- 3. GET ADMIN DISTRIBUTORS LIST
--- Returns paginated list with search and filter
+-- 2. GET ADMIN DISTRIBUTORS LIST (with stats included)
+-- Returns paginated list with search and filter AND stats
+-- Stats are merged into the response
 -- ============================================================
 
 DROP FUNCTION IF EXISTS get_admin_distributors_list(TEXT, TEXT, INTEGER, INTEGER);
@@ -111,6 +64,10 @@ DECLARE
     v_total_count INTEGER;
     v_offset INTEGER;
     v_normalized_search TEXT;
+    -- Stats variables (global, not affected by search/filter)
+    v_stats_total_distributors INTEGER;
+    v_stats_active_distributors INTEGER;
+    v_stats_total_deals INTEGER;
 BEGIN
     -- Normalize search parameter
     IF p_search IS NOT NULL THEN
@@ -125,7 +82,19 @@ BEGIN
     -- Calculate offset
     v_offset := (p_page - 1) * p_limit;
     
-    -- Get total count with filters
+    -- Get GLOBAL stats (not affected by search/filter)
+    SELECT COUNT(*)::INTEGER INTO v_stats_total_distributors
+    FROM reverse_distributors;
+    
+    SELECT COUNT(*)::INTEGER INTO v_stats_active_distributors
+    FROM reverse_distributors
+    WHERE is_active = TRUE;
+    
+    SELECT COUNT(*)::INTEGER INTO v_stats_total_deals
+    FROM custom_packages
+    WHERE distributor_id IS NOT NULL;
+    
+    -- Get total count with filters (for pagination)
     SELECT COUNT(*)::INTEGER
     INTO v_total_count
     FROM reverse_distributors rd
@@ -185,7 +154,7 @@ BEGIN
     INTO v_distributors
     FROM distributor_data;
     
-    -- Build result
+    -- Build result with stats included
     v_result := jsonb_build_object(
         'distributors', v_distributors,
         'pagination', jsonb_build_object(
@@ -198,6 +167,12 @@ BEGIN
             'search', v_normalized_search,
             'status', p_status
         ),
+        'stats', jsonb_build_object(
+            'totalDistributors', v_stats_total_distributors,
+            'activeDistributors', v_stats_active_distributors,
+            'inactiveDistributors', v_stats_total_distributors - v_stats_active_distributors,
+            'totalDeals', v_stats_total_deals
+        ),
         'generatedAt', NOW()
     );
     
@@ -209,7 +184,7 @@ GRANT EXECUTE ON FUNCTION get_admin_distributors_list(TEXT, TEXT, INTEGER, INTEG
 GRANT EXECUTE ON FUNCTION get_admin_distributors_list(TEXT, TEXT, INTEGER, INTEGER) TO service_role;
 
 -- ============================================================
--- 4. GET ADMIN DISTRIBUTOR BY ID
+-- 3. GET ADMIN DISTRIBUTOR BY ID
 -- Returns single distributor with all details
 -- ============================================================
 
@@ -274,7 +249,7 @@ GRANT EXECUTE ON FUNCTION get_admin_distributor_by_id(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION get_admin_distributor_by_id(UUID) TO service_role;
 
 -- ============================================================
--- 5. CREATE ADMIN DISTRIBUTOR
+-- 4. CREATE ADMIN DISTRIBUTOR
 -- Creates a new reverse distributor
 -- ============================================================
 
@@ -356,7 +331,7 @@ GRANT EXECUTE ON FUNCTION create_admin_distributor(TEXT, TEXT, TEXT, TEXT, TEXT,
 GRANT EXECUTE ON FUNCTION create_admin_distributor(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT[]) TO service_role;
 
 -- ============================================================
--- 6. UPDATE ADMIN DISTRIBUTOR
+-- 5. UPDATE ADMIN DISTRIBUTOR
 -- Updates an existing distributor
 -- ============================================================
 
@@ -438,7 +413,7 @@ GRANT EXECUTE ON FUNCTION update_admin_distributor(UUID, TEXT, TEXT, TEXT, TEXT,
 GRANT EXECUTE ON FUNCTION update_admin_distributor(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT[]) TO service_role;
 
 -- ============================================================
--- 7. UPDATE ADMIN DISTRIBUTOR STATUS
+-- 6. UPDATE ADMIN DISTRIBUTOR STATUS
 -- Activates or deactivates a distributor
 -- ============================================================
 
@@ -485,7 +460,7 @@ GRANT EXECUTE ON FUNCTION update_admin_distributor_status(UUID, TEXT) TO authent
 GRANT EXECUTE ON FUNCTION update_admin_distributor_status(UUID, TEXT) TO service_role;
 
 -- ============================================================
--- 8. DELETE ADMIN DISTRIBUTOR
+-- 7. DELETE ADMIN DISTRIBUTOR
 -- Deletes a distributor (soft delete optional - for now hard delete)
 -- ============================================================
 
@@ -539,4 +514,3 @@ $$;
 
 GRANT EXECUTE ON FUNCTION delete_admin_distributor(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION delete_admin_distributor(UUID) TO service_role;
-

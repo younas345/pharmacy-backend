@@ -10,7 +10,6 @@ export interface DistributorStats {
   activeDistributors: number;
   inactiveDistributors: number;
   totalDeals: number;
-  generatedAt: string;
 }
 
 export interface DistributorListItem {
@@ -42,6 +41,7 @@ export interface DistributorsListResponse {
     search: string | null;
     status: string;
   };
+  stats: DistributorStats;
   generatedAt: string;
 }
 
@@ -88,28 +88,9 @@ export interface UpdateDistributorData {
 // ============================================================
 
 /**
- * Get distributor stats for dashboard cards
+ * Get list of distributors with search, filter, pagination AND stats
  * Uses PostgreSQL RPC function - no custom JS logic
- */
-export const getDistributorsStats = async (): Promise<DistributorStats> => {
-  if (!supabaseAdmin) {
-    throw new AppError('Supabase admin client not configured', 500);
-  }
-
-  console.log('📊 Fetching distributors stats');
-
-  const { data, error } = await supabaseAdmin.rpc('get_admin_distributors_stats');
-
-  if (error) {
-    throw new AppError(`Failed to fetch distributors stats: ${error.message}`, 400);
-  }
-
-  return data as DistributorStats;
-};
-
-/**
- * Get list of distributors with search, filter, and pagination
- * Uses PostgreSQL RPC function - no custom JS logic
+ * Stats are included in the response
  */
 export const getDistributorsList = async (
   search?: string,
@@ -120,8 +101,6 @@ export const getDistributorsList = async (
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
-
-  console.log(`📋 Fetching distributors list (search: ${search || 'none'}, status: ${status}, page: ${page})`);
 
   const { data, error } = await supabaseAdmin.rpc('get_admin_distributors_list', {
     p_search: search || null,
@@ -148,8 +127,6 @@ export const getDistributorById = async (
     throw new AppError('Supabase admin client not configured', 500);
   }
 
-  console.log(`🔍 Fetching distributor by ID: ${distributorId}`);
-
   const { data, error } = await supabaseAdmin.rpc('get_admin_distributor_by_id', {
     p_distributor_id: distributorId,
   });
@@ -174,8 +151,6 @@ export const createDistributor = async (
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
-
-  console.log(`➕ Creating new distributor: ${distributorData.companyName}`);
 
   const { data, error } = await supabaseAdmin.rpc('create_admin_distributor', {
     p_company_name: distributorData.companyName,
@@ -211,8 +186,6 @@ export const updateDistributor = async (
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
-
-  console.log(`✏️ Updating distributor: ${distributorId}`);
 
   const { data, error } = await supabaseAdmin.rpc('update_admin_distributor', {
     p_distributor_id: distributorId,
@@ -250,8 +223,6 @@ export const updateDistributorStatus = async (
     throw new AppError('Supabase admin client not configured', 500);
   }
 
-  console.log(`🔄 Updating distributor status: ${distributorId} -> ${status}`);
-
   const { data, error } = await supabaseAdmin.rpc('update_admin_distributor_status', {
     p_distributor_id: distributorId,
     p_status: status,
@@ -281,8 +252,6 @@ export const deleteDistributor = async (
     throw new AppError('Supabase admin client not configured', 500);
   }
 
-  console.log(`🗑️ Deleting distributor: ${distributorId}`);
-
   const { data, error } = await supabaseAdmin.rpc('delete_admin_distributor', {
     p_distributor_id: distributorId,
   });
@@ -299,4 +268,3 @@ export const deleteDistributor = async (
 
   return data;
 };
-

@@ -72,13 +72,67 @@ export const addProductListItem = async (
 };
 
 // Remove item from product list
-export const removeItemFromProductList = async (itemId: string): Promise<void> => {
+export const removeItemFromProductList = async (itemId: string, pharmacyId: string): Promise<void> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
 
   const db = supabaseAdmin;
 
+  // First, verify the item exists and belongs to the pharmacy
+  const { data: existingItem, error: fetchError } = await db
+    .from('product_list_items')
+    .select('id, added_by, product_name, ndc')
+    .eq('id', itemId)
+    .single();
+
+  if (fetchError || !existingItem) {
+    throw new AppError('Product list item not found', 404);
+  }
+
+  if (existingItem.added_by !== pharmacyId) {
+    throw new AppError('You do not have permission to delete this item', 403);
+  }
+
+  // Check if this product is used in any packages
+  // Get all packages for this pharmacy
+  const { data: packages, error: packagesError } = await db
+    .from('custom_packages')
+    .select('id')
+    .eq('pharmacy_id', pharmacyId);
+
+  if (packagesError) {
+    throw new AppError(`Failed to check packages: ${packagesError.message}`, 400);
+  }
+
+  const packageIds = (packages || []).map((pkg: any) => pkg.id);
+
+  if (packageIds.length > 0) {
+    // Check if this product_id is used in any package items
+    const { data: usedInPackages, error: usageError } = await db
+      .from('custom_package_items')
+      .select('id, package_id, full, partial')
+      .eq('product_id', itemId)
+      .in('package_id', packageIds);
+
+    if (usageError) {
+      throw new AppError(`Failed to check package usage: ${usageError.message}`, 400);
+    }
+
+    if (usedInPackages && usedInPackages.length > 0) {
+      // Calculate total quantity used in packages
+      const totalUsedFull = usedInPackages.reduce((sum: number, item: any) => sum + (item.full || 0), 0);
+      const totalUsedPartial = usedInPackages.reduce((sum: number, item: any) => sum + (item.partial || 0), 0);
+      const totalUsed = totalUsedFull + totalUsedPartial;
+
+      throw new AppError(
+        `Cannot delete this product. It is currently used in ${usedInPackages.length} package(s) with a total of ${totalUsed} units (${totalUsedFull} full, ${totalUsedPartial} partial). Please remove it from all packages first before deleting.`,
+        400
+      );
+    }
+  }
+
+  // Safe to delete - not used in any packages
   const { error } = await db
     .from('product_list_items')
     .delete()
@@ -235,7 +289,7 @@ export const updateProductListItem = async (
   // First, verify the item exists and belongs to the pharmacy
   const { data: existingItem, error: fetchError } = await db
     .from('product_list_items')
-    .select('id, added_by, full_units, partial_units')
+    .select('id, added_by, full_units, partial_units, product_name, ndc')
     .eq('id', itemId)
     .single();
 
@@ -264,6 +318,55 @@ export const updateProductListItem = async (
     // Validate: one must be 0 and the other must be > 0
     if (!((newFullUnits === 0 && newPartialUnits > 0) || (newFullUnits > 0 && newPartialUnits === 0))) {
       throw new AppError('One of full_units or partial_units must be 0, and the other must be greater than 0', 400);
+    }
+
+    // Check how much of this product is already used in packages
+    // Get all packages for this pharmacy
+    const { data: packages, error: packagesError } = await db
+      .from('custom_packages')
+      .select('id')
+      .eq('pharmacy_id', pharmacyId);
+
+    if (packagesError) {
+      throw new AppError(`Failed to check packages: ${packagesError.message}`, 400);
+    }
+
+    const packageIds = (packages || []).map((pkg: any) => pkg.id);
+
+    let usedFullUnits = 0;
+    let usedPartialUnits = 0;
+
+    if (packageIds.length > 0) {
+      // Get total quantities used in packages for this product_id
+      const { data: usedInPackages, error: usageError } = await db
+        .from('custom_package_items')
+        .select('full, partial')
+        .eq('product_id', itemId)
+        .in('package_id', packageIds);
+
+      if (usageError) {
+        throw new AppError(`Failed to check package usage: ${usageError.message}`, 400);
+      }
+
+      if (usedInPackages && usedInPackages.length > 0) {
+        usedFullUnits = usedInPackages.reduce((sum: number, item: any) => sum + (item.full || 0), 0);
+        usedPartialUnits = usedInPackages.reduce((sum: number, item: any) => sum + (item.partial || 0), 0);
+      }
+    }
+
+    // Validate: cannot decrease below what's already used in packages
+    if (newFullUnits < usedFullUnits) {
+      throw new AppError(
+        `Cannot decrease full units to ${newFullUnits}. This product has ${usedFullUnits} full unit(s) already added to package(s). You can only set full_units to ${usedFullUnits} or higher.`,
+        400
+      );
+    }
+
+    if (newPartialUnits < usedPartialUnits) {
+      throw new AppError(
+        `Cannot decrease partial units to ${newPartialUnits}. This product has ${usedPartialUnits} partial unit(s) already added to package(s). You can only set partial_units to ${usedPartialUnits} or higher.`,
+        400
+      );
     }
 
     if (updates.full_units !== undefined) updateData.full_units = newFullUnits;
