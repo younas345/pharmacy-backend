@@ -6,6 +6,8 @@ import {
   deleteCustomPackage,
   updatePackageStatus,
   addItemsToCustomPackage,
+  updatePackageItem,
+  deletePackageItem,
   CreateCustomPackageRequest,
 } from '../services/customPackagesService';
 import { catchAsync } from '../utils/catchAsync';
@@ -193,6 +195,81 @@ export const addItemsToPackageHandler = catchAsync(
       message: `${itemsAdded} item(s) added, ${itemsUpdated} item(s) updated`,
       itemsAdded,
       itemsUpdated,
+    });
+  }
+);
+
+// Update a single package item
+// Uses RPC function - no custom JS logic
+export const updatePackageItemHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId;
+    const packageId = req.params.id;
+    const itemId = req.params.itemId;
+
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
+    if (!packageId) {
+      throw new AppError('Package ID is required', 400);
+    }
+
+    if (!itemId) {
+      throw new AppError('Item ID is required', 400);
+    }
+
+    const { ndc, productName, full, partial, pricePerUnit, totalValue } = req.body;
+
+    const result = await updatePackageItem(pharmacyId, packageId, itemId, {
+      ndc,
+      productName,
+      full,
+      partial,
+      pricePerUnit,
+      totalValue,
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Item updated successfully',
+      data: {
+        item: result.item,
+        packageTotals: result.packageTotals,
+      },
+    });
+  }
+);
+
+// Delete a single package item
+// Uses RPC function - no custom JS logic
+export const deletePackageItemHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const pharmacyId = req.pharmacyId;
+    const packageId = req.params.id;
+    const itemId = req.params.itemId;
+
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 400);
+    }
+
+    if (!packageId) {
+      throw new AppError('Package ID is required', 400);
+    }
+
+    if (!itemId) {
+      throw new AppError('Item ID is required', 400);
+    }
+
+    const result = await deletePackageItem(pharmacyId, packageId, itemId);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Item deleted successfully',
+      data: {
+        deletedItem: result.deletedItem,
+        packageTotals: result.packageTotals,
+      },
     });
   }
 );

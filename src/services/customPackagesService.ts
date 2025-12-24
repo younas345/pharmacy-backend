@@ -913,3 +913,107 @@ export const addItemsToCustomPackage = async (
   };
 };
 
+// Interface for updating a package item
+export interface UpdatePackageItemRequest {
+  ndc?: string;
+  productName?: string;
+  full?: number;
+  partial?: number;
+  pricePerUnit?: number;
+  totalValue?: number;
+}
+
+// Interface for package totals response
+export interface PackageTotals {
+  totalItems: number;
+  totalEstimatedValue: number;
+  feeAmount: number;
+  netEstimatedValue: number;
+}
+
+// Update a single package item
+// Uses PostgreSQL RPC function - no custom JS logic
+export const updatePackageItem = async (
+  pharmacyId: string,
+  packageId: string,
+  itemId: string,
+  updateData: UpdatePackageItemRequest
+): Promise<{ item: CustomPackageItem; packageTotals: PackageTotals }> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('update_package_item', {
+    p_pharmacy_id: pharmacyId,
+    p_package_id: packageId,
+    p_item_id: itemId,
+    p_ndc: updateData.ndc || null,
+    p_product_name: updateData.productName || null,
+    p_full: updateData.full ?? null,
+    p_partial: updateData.partial ?? null,
+    p_price_per_unit: updateData.pricePerUnit ?? null,
+    p_total_value: updateData.totalValue ?? null,
+  });
+
+  if (error) {
+    throw new AppError(`Failed to update package item: ${error.message}`, 400);
+  }
+
+  if (data.error) {
+    throw new AppError(data.message, 400);
+  }
+
+  return {
+    item: {
+      id: data.item.id,
+      ndc: data.item.ndc,
+      productId: data.item.productId || undefined,
+      productName: data.item.productName,
+      full: data.item.full || 0,
+      partial: data.item.partial || 0,
+      pricePerUnit: data.item.pricePerUnit,
+      totalValue: data.item.totalValue,
+    },
+    packageTotals: data.packageTotals,
+  };
+};
+
+// Delete a single package item
+// Uses PostgreSQL RPC function - no custom JS logic
+export const deletePackageItem = async (
+  pharmacyId: string,
+  packageId: string,
+  itemId: string
+): Promise<{ deletedItem: CustomPackageItem; packageTotals: PackageTotals }> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('delete_package_item', {
+    p_pharmacy_id: pharmacyId,
+    p_package_id: packageId,
+    p_item_id: itemId,
+  });
+
+  if (error) {
+    throw new AppError(`Failed to delete package item: ${error.message}`, 400);
+  }
+
+  if (data.error) {
+    throw new AppError(data.message, 400);
+  }
+
+  return {
+    deletedItem: {
+      id: data.deletedItem.id,
+      ndc: data.deletedItem.ndc,
+      productId: data.deletedItem.productId || undefined,
+      productName: data.deletedItem.productName,
+      full: data.deletedItem.full || 0,
+      partial: data.deletedItem.partial || 0,
+      pricePerUnit: data.deletedItem.pricePerUnit,
+      totalValue: data.deletedItem.totalValue,
+    },
+    packageTotals: data.packageTotals,
+  };
+};
