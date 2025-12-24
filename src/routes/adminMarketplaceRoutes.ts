@@ -1,0 +1,673 @@
+import { Router } from 'express';
+import {
+  getMarketplaceDealsHandler,
+  getMarketplaceStatsHandler,
+  getMarketplaceCategoriesHandler,
+  getMarketplaceDealByIdHandler,
+  createMarketplaceDealHandler,
+  updateMarketplaceDealHandler,
+  markDealAsSoldHandler,
+  deleteMarketplaceDealHandler,
+} from '../controllers/adminMarketplaceController';
+import { authenticateAdmin } from '../middleware/adminAuth';
+
+const router = Router();
+
+// Apply admin authentication to all routes
+router.use(authenticateAdmin);
+
+// ============================================================
+// Swagger Schemas
+// ============================================================
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     MarketplaceDeal:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *           format: uuid
+ *           description: Deal ID
+ *         dealNumber:
+ *           type: string
+ *           description: Auto-generated deal number
+ *           example: "DEAL-001"
+ *         productName:
+ *           type: string
+ *           description: Product name
+ *           example: "Ibuprofen 200mg"
+ *         category:
+ *           type: string
+ *           description: Product category
+ *           example: "Pain Relief"
+ *         ndc:
+ *           type: string
+ *           nullable: true
+ *           description: NDC code
+ *           example: "00069-0600-66"
+ *         quantity:
+ *           type: integer
+ *           description: Available quantity
+ *           example: 500
+ *         unit:
+ *           type: string
+ *           enum: [bottles, boxes, units, packs]
+ *           description: Unit type
+ *           example: "bottles"
+ *         originalPrice:
+ *           type: number
+ *           format: float
+ *           description: Original price per unit
+ *           example: 15.00
+ *         dealPrice:
+ *           type: number
+ *           format: float
+ *           description: Deal price per unit
+ *           example: 12.00
+ *         savings:
+ *           type: integer
+ *           description: Savings percentage
+ *           example: 20
+ *         margin:
+ *           type: integer
+ *           description: Margin percentage
+ *           example: 80
+ *         distributorId:
+ *           type: string
+ *           format: uuid
+ *           nullable: true
+ *           description: Distributor ID reference
+ *         distributor:
+ *           type: string
+ *           description: Distributor name
+ *           example: "MediSupply Corp"
+ *         expiryDate:
+ *           type: string
+ *           format: date
+ *           description: Product expiry date
+ *           example: "2025-06-30"
+ *         postedDate:
+ *           type: string
+ *           format: date
+ *           description: Deal posted date
+ *           example: "2024-12-10"
+ *         status:
+ *           type: string
+ *           enum: [active, sold, expired]
+ *           description: Deal status
+ *           example: "active"
+ *         notes:
+ *           type: string
+ *           nullable: true
+ *           description: Additional notes
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *           description: Creation timestamp
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ *           description: Last update timestamp
+ *     
+ *     MarketplaceStats:
+ *       type: object
+ *       properties:
+ *         totalDeals:
+ *           type: integer
+ *           description: Total number of deals
+ *           example: 25
+ *         activeDeals:
+ *           type: integer
+ *           description: Number of active deals
+ *           example: 18
+ *         soldDeals:
+ *           type: integer
+ *           description: Number of sold deals
+ *           example: 5
+ *         expiredDeals:
+ *           type: integer
+ *           description: Number of expired deals
+ *           example: 2
+ *         totalItems:
+ *           type: integer
+ *           description: Total quantity of items
+ *           example: 5000
+ *         totalValue:
+ *           type: number
+ *           format: float
+ *           description: Total value of all deals
+ *           example: 75000.00
+ *         avgSavings:
+ *           type: number
+ *           format: float
+ *           description: Average savings percentage
+ *           example: 22.5
+ *     
+ *     CategoryOption:
+ *       type: object
+ *       properties:
+ *         value:
+ *           type: string
+ *           description: Category value
+ *           example: "Pain Relief"
+ *         label:
+ *           type: string
+ *           description: Category display label
+ *           example: "Pain Relief"
+ *         count:
+ *           type: integer
+ *           description: Number of deals in category
+ *           example: 5
+ *     
+ *     CreateDealRequest:
+ *       type: object
+ *       required:
+ *         - productName
+ *         - category
+ *         - quantity
+ *         - unit
+ *         - originalPrice
+ *         - dealPrice
+ *         - distributorName
+ *         - expiryDate
+ *       properties:
+ *         productName:
+ *           type: string
+ *           description: Product name
+ *           example: "Ibuprofen 200mg"
+ *         category:
+ *           type: string
+ *           description: Product category
+ *           example: "Pain Relief"
+ *         quantity:
+ *           type: integer
+ *           minimum: 1
+ *           description: Available quantity
+ *           example: 500
+ *         unit:
+ *           type: string
+ *           enum: [bottles, boxes, units, packs]
+ *           description: Unit type
+ *           example: "bottles"
+ *         originalPrice:
+ *           type: number
+ *           format: float
+ *           minimum: 0.01
+ *           description: Original price per unit
+ *           example: 15.00
+ *         dealPrice:
+ *           type: number
+ *           format: float
+ *           minimum: 0.01
+ *           description: Deal price per unit (must be less than original)
+ *           example: 12.00
+ *         distributorName:
+ *           type: string
+ *           description: Distributor name
+ *           example: "MediSupply Corp"
+ *         expiryDate:
+ *           type: string
+ *           format: date
+ *           description: Product expiry date (must be future)
+ *           example: "2025-06-30"
+ *         ndc:
+ *           type: string
+ *           description: Optional NDC code
+ *           example: "00069-0600-66"
+ *         distributorId:
+ *           type: string
+ *           format: uuid
+ *           description: Optional distributor ID reference
+ *         notes:
+ *           type: string
+ *           description: Additional notes
+ *     
+ *     UpdateDealRequest:
+ *       type: object
+ *       properties:
+ *         productName:
+ *           type: string
+ *           description: Product name
+ *         category:
+ *           type: string
+ *           description: Product category
+ *         quantity:
+ *           type: integer
+ *           minimum: 1
+ *           description: Available quantity
+ *         unit:
+ *           type: string
+ *           enum: [bottles, boxes, units, packs]
+ *           description: Unit type
+ *         originalPrice:
+ *           type: number
+ *           format: float
+ *           description: Original price per unit
+ *         dealPrice:
+ *           type: number
+ *           format: float
+ *           description: Deal price per unit
+ *         distributorName:
+ *           type: string
+ *           description: Distributor name
+ *         expiryDate:
+ *           type: string
+ *           format: date
+ *           description: Product expiry date
+ *         ndc:
+ *           type: string
+ *           description: NDC code
+ *         status:
+ *           type: string
+ *           enum: [active, sold, expired]
+ *           description: Deal status
+ *         notes:
+ *           type: string
+ *           description: Additional notes
+ *     
+ *     MarketplaceListResponse:
+ *       type: object
+ *       properties:
+ *         deals:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/MarketplaceDeal'
+ *         stats:
+ *           $ref: '#/components/schemas/MarketplaceStats'
+ *         pagination:
+ *           type: object
+ *           properties:
+ *             page:
+ *               type: integer
+ *               example: 1
+ *             limit:
+ *               type: integer
+ *               example: 12
+ *             total:
+ *               type: integer
+ *               example: 25
+ *             totalPages:
+ *               type: integer
+ *               example: 3
+ */
+
+// ============================================================
+// Routes
+// ============================================================
+
+/**
+ * @swagger
+ * /api/admin/marketplace:
+ *   get:
+ *     summary: Get list of marketplace deals with stats
+ *     description: |
+ *       Returns a paginated list of marketplace deals with filtering, search, and sorting options.
+ *       Also includes statistics about deals.
+ *       
+ *       **Available Status:**
+ *       - **active**: Deal is currently available
+ *       - **sold**: Deal has been sold
+ *       - **expired**: Deal has expired (auto-updated based on expiry date)
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 12
+ *         description: Number of items per page
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search by product name, distributor, deal number, or category
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Filter by category
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [all, active, sold, expired]
+ *         description: Filter by status
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [product_name, category, distributor, status, posted_date, expiry_date, deal_price, quantity]
+ *           default: posted_date
+ *         description: Sort by field
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *         description: Sort order
+ *     responses:
+ *       200:
+ *         description: Marketplace deals retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   $ref: '#/components/schemas/MarketplaceListResponse'
+ *       401:
+ *         description: Unauthorized - invalid or missing admin token
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/', getMarketplaceDealsHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/stats:
+ *   get:
+ *     summary: Get marketplace statistics
+ *     description: Returns statistics about marketplace deals.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Statistics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     stats:
+ *                       $ref: '#/components/schemas/MarketplaceStats'
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/stats', getMarketplaceStatsHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/categories:
+ *   get:
+ *     summary: Get all marketplace categories
+ *     description: Returns all unique categories with deal counts.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Categories retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     categories:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/CategoryOption'
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/categories', getMarketplaceCategoriesHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/{id}:
+ *   get:
+ *     summary: Get marketplace deal by ID
+ *     description: Returns detailed information about a specific deal.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Deal ID
+ *     responses:
+ *       200:
+ *         description: Deal retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deal:
+ *                       $ref: '#/components/schemas/MarketplaceDeal'
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Deal not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/:id', getMarketplaceDealByIdHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace:
+ *   post:
+ *     summary: Create new marketplace deal
+ *     description: |
+ *       Creates a new marketplace deal.
+ *       
+ *       **Validation Rules:**
+ *       - Deal price must be less than original price
+ *       - Expiry date must be in the future
+ *       - Quantity must be greater than 0
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateDealRequest'
+ *     responses:
+ *       201:
+ *         description: Deal created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Deal created successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deal:
+ *                       $ref: '#/components/schemas/MarketplaceDeal'
+ *       400:
+ *         description: Bad request - validation error
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/', createMarketplaceDealHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/{id}:
+ *   patch:
+ *     summary: Update marketplace deal
+ *     description: Updates an existing deal. Only provided fields will be updated.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Deal ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateDealRequest'
+ *     responses:
+ *       200:
+ *         description: Deal updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Deal updated successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deal:
+ *                       $ref: '#/components/schemas/MarketplaceDeal'
+ *       400:
+ *         description: Bad request - validation error
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Deal not found
+ *       500:
+ *         description: Internal server error
+ */
+router.patch('/:id', updateMarketplaceDealHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/{id}/sold:
+ *   patch:
+ *     summary: Mark deal as sold
+ *     description: Quick action to mark a deal as sold.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Deal ID
+ *     responses:
+ *       200:
+ *         description: Deal marked as sold successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Deal marked as sold successfully
+ *       400:
+ *         description: Bad request - deal already sold or expired
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Deal not found
+ *       500:
+ *         description: Internal server error
+ */
+router.patch('/:id/sold', markDealAsSoldHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/{id}:
+ *   delete:
+ *     summary: Delete marketplace deal
+ *     description: Deletes a deal from the marketplace.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Deal ID to delete
+ *     responses:
+ *       200:
+ *         description: Deal deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Deal deleted successfully
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Deal not found
+ *       500:
+ *         description: Internal server error
+ */
+router.delete('/:id', deleteMarketplaceDealHandler);
+
+export default router;
+
