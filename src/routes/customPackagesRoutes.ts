@@ -6,6 +6,8 @@ import {
   deleteCustomPackageHandler,
   updatePackageStatusHandler,
   addItemsToPackageHandler,
+  updatePackageItemHandler,
+  deletePackageItemHandler,
 } from '../controllers/customPackagesController';
 
 const router = Router();
@@ -427,6 +429,172 @@ router.patch('/:id/mark-status', updatePackageStatusHandler);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.patch('/:id/add-items', addItemsToPackageHandler);
+
+/**
+ * @swagger
+ * /api/optimization/custom-packages/{id}/items/{itemId}:
+ *   patch:
+ *     summary: Update a single package item
+ *     description: |
+ *       Updates a single item in a custom package. Only non-delivered packages (status = false) can be updated.
+ *       All logic is handled by an RPC function with no JavaScript loops.
+ *       
+ *       **Note:** Package totals (totalItems, totalEstimatedValue, feeAmount, netEstimatedValue) are automatically recalculated.
+ *     tags: [Optimization]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Package ID
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Item ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               ndc:
+ *                 type: string
+ *                 description: NDC code
+ *                 example: "59746017110"
+ *               productName:
+ *                 type: string
+ *                 description: Product name
+ *                 example: "prednisone 1 MG Oral Tablet"
+ *               full:
+ *                 type: integer
+ *                 description: Number of full units
+ *                 example: 5
+ *               partial:
+ *                 type: integer
+ *                 description: Number of partial units
+ *                 example: 2
+ *               pricePerUnit:
+ *                 type: number
+ *                 description: Price per unit
+ *                 example: 35.42
+ *               totalValue:
+ *                 type: number
+ *                 description: Total value for this item
+ *                 example: 248.94
+ *     responses:
+ *       200:
+ *         description: Item updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Item updated successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     item:
+ *                       $ref: '#/components/schemas/CustomPackageItem'
+ *                     packageTotals:
+ *                       type: object
+ *                       properties:
+ *                         totalItems:
+ *                           type: integer
+ *                         totalEstimatedValue:
+ *                           type: number
+ *                         feeAmount:
+ *                           type: number
+ *                         netEstimatedValue:
+ *                           type: number
+ *       400:
+ *         description: Bad request - validation error or package is delivered
+ *       404:
+ *         description: Package or item not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.patch('/:id/items/:itemId', updatePackageItemHandler);
+
+/**
+ * @swagger
+ * /api/optimization/custom-packages/{id}/items/{itemId}:
+ *   delete:
+ *     summary: Delete a single package item
+ *     description: |
+ *       Deletes a single item from a custom package. Only non-delivered packages (status = false) can be updated.
+ *       Cannot delete the last item in a package - delete the entire package instead.
+ *       All logic is handled by an RPC function with no JavaScript loops.
+ *       
+ *       **Note:** Package totals are automatically recalculated after deletion.
+ *     tags: [Optimization]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Package ID
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Item ID to delete
+ *     responses:
+ *       200:
+ *         description: Item deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Item deleted successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deletedItem:
+ *                       $ref: '#/components/schemas/CustomPackageItem'
+ *                     packageTotals:
+ *                       type: object
+ *                       properties:
+ *                         totalItems:
+ *                           type: integer
+ *                         totalEstimatedValue:
+ *                           type: number
+ *                         feeAmount:
+ *                           type: number
+ *                         netEstimatedValue:
+ *                           type: number
+ *       400:
+ *         description: Bad request - cannot delete last item or package is delivered
+ *       404:
+ *         description: Package or item not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.delete('/:id/items/:itemId', deletePackageItemHandler);
 
 export default router;
 
