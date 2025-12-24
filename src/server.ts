@@ -36,7 +36,7 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
 }
 
 const app = express();
-const PORT = 3005;
+const PORT = process.env.PORT || 3000;
 
 const allowedOrigins = [
   'http://localhost:3000',
