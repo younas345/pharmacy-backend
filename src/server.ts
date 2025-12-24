@@ -24,6 +24,7 @@ import adminPaymentsRoutes from './routes/adminPaymentsRoutes';
 import adminAnalyticsRoutes from './routes/adminAnalyticsRoutes';
 import adminUsersRoutes from './routes/adminUsersRoutes';
 import adminSettingsRoutes from './routes/adminSettingsRoutes';
+import adminMarketplaceRoutes from './routes/adminMarketplaceRoutes';
 import { globalErrorHandler } from './controllers/errorController';
 import { swaggerSpec } from './config/swagger';
 import cors from 'cors';
@@ -129,6 +130,7 @@ app.use('/api/admin/payments', adminPaymentsRoutes);
 app.use('/api/admin/analytics', adminAnalyticsRoutes);
 app.use('/api/admin/users', adminUsersRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);
+app.use('/api/admin/marketplace', adminMarketplaceRoutes);
 
 /**
  * @swagger
