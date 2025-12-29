@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { adminLogin, adminForgotPassword, adminVerifyResetToken, adminResetPassword } from '../services/adminService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
+import { sendAdminPasswordResetEmail, isEmailConfigured } from '../services/emailService';
 
 /**
  * @swagger
@@ -116,16 +117,29 @@ export const adminForgotPasswordHandler = catchAsync(
 
     const result = await adminForgotPassword(email);
 
-    // If we have a reset token, we should send an email
-    // For now, we just return success (email sending can be implemented separately)
-    if (result.resetToken) {
+    // If we have a reset token, send an email
+    if (result.resetToken && result.adminName && result.adminEmail) {
       const baseUrl = redirectTo || process.env.ADMIN_PASSWORD_RESET_REDIRECT_URL || 'http://localhost:3002/reset-password';
       const resetLink = `${baseUrl}?token=${result.resetToken}`;
       
-      // TODO: Send email with resetLink
-      // For now, log it in development
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`[Admin Password Reset] Reset link for ${email}: ${resetLink}`);
+      // Log the reset link for debugging (always log for now)
+      console.log(`[Admin Password Reset] Reset link for ${email}: ${resetLink}`);
+      
+      // Send email if SMTP is configured
+      if (isEmailConfigured()) {
+        const emailSent = await sendAdminPasswordResetEmail(
+          result.adminEmail,
+          result.adminName,
+          resetLink
+        );
+        
+        if (emailSent) {
+          console.log(`[Admin Password Reset] Email sent successfully to ${result.adminEmail}`);
+        } else {
+          console.error(`[Admin Password Reset] Failed to send email to ${result.adminEmail}`);
+        }
+      } else {
+        console.warn('[Admin Password Reset] SMTP not configured. Email not sent. Check the console for the reset link.');
       }
     }
 
