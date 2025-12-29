@@ -921,7 +921,7 @@ export interface UpdatePackageItemRequest {
   partial?: number;
   pricePerUnit?: number;
   totalValue?: number;
-}
+    }
 
 // Interface for package totals response
 export interface PackageTotals {

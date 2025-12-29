@@ -482,3 +482,165 @@ export const logout = async (refreshTokenValue: string): Promise<void> => {
 export const logoutAll = async (pharmacyId: string): Promise<void> => {
   await revokeAllRefreshTokens(pharmacyId);
 };
+
+/**
+ * Request password reset - sends password reset email via Supabase
+ * @param email - User's email address
+ * @param redirectTo - URL to redirect to after password reset (frontend reset page)
+ */
+export const forgotPassword = async (email: string, redirectTo?: string): Promise<{ message: string }> => {
+  if (!email) {
+    throw new AppError('Email is required', 400);
+  }
+
+  // Check if pharmacy exists with this email
+  const { data: pharmacyData, error: pharmacyError } = await db
+    .from('pharmacy')
+    .select('id, email, status')
+    .eq('email', email.toLowerCase().trim())
+    .single();
+
+  if (pharmacyError || !pharmacyData) {
+    // Don't reveal if email exists or not for security
+    // Always return success message
+    return {
+      message: 'If an account with this email exists, a password reset link has been sent.',
+    };
+  }
+
+  // Check pharmacy status - don't send reset email to blocked/suspended accounts
+  const pharmacyStatus = pharmacyData.status?.toLowerCase() || 'pending';
+  if (pharmacyStatus === 'blacklisted') {
+    throw new AppError('This account has been permanently blocked. Please contact support.', 403);
+  } else if (pharmacyStatus === 'suspended') {
+    throw new AppError('This account has been suspended. Please contact support to reactivate.', 403);
+  }
+
+  // Send password reset email via Supabase
+  const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
+    redirectTo: redirectTo || process.env.PASSWORD_RESET_REDIRECT_URL || 'http://localhost:3001/reset-password',
+  });
+
+  if (resetError) {
+    console.error('Supabase password reset error:', resetError);
+    // Don't reveal the actual error for security
+    throw new AppError('Failed to send password reset email. Please try again later.', 500);
+  }
+
+  return {
+    message: 'If an account with this email exists, a password reset link has been sent.',
+  };
+};
+
+/**
+ * Reset password using the access token received from Supabase redirect
+ * @param accessToken - The access token from Supabase password reset redirect
+ * @param newPassword - The new password to set
+ */
+export const resetPassword = async (accessToken: string, newPassword: string): Promise<{ message: string }> => {
+  if (!accessToken) {
+    throw new AppError('Access token is required', 400);
+  }
+
+  if (!newPassword) {
+    throw new AppError('New password is required', 400);
+  }
+
+  // Validate password strength
+  if (newPassword.length < 8) {
+    throw new AppError('Password must be at least 8 characters long', 400);
+  }
+
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  // Create a Supabase client to verify the recovery token
+  const { createClient } = await import('@supabase/supabase-js');
+  const supabaseUrl = process.env.SUPABASE_URL!;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY!;
+
+  // Create a client with the access token in the header to verify it
+  const userSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+
+  // Verify the token by getting user info - this validates the JWT
+  const { data: userData, error: userError } = await userSupabase.auth.getUser();
+
+  if (userError || !userData?.user) {
+    console.error('Token verification error:', userError);
+    throw new AppError('Invalid or expired reset token. Please request a new password reset.', 401);
+  }
+
+  // Use admin client to update the password (bypasses session requirement)
+  const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+    userData.user.id,
+    { password: newPassword }
+  );
+
+  if (updateError) {
+    console.error('Password update error:', updateError);
+    throw new AppError('Failed to update password. Please try again or request a new reset link.', 500);
+  }
+
+  // Revoke all existing refresh tokens for this user for security
+  await revokeAllRefreshTokens(userData.user.id);
+
+  return {
+    message: 'Password has been reset successfully. Please login with your new password.',
+  };
+};
+
+/**
+ * Verify password reset token (optional - for frontend to check if token is still valid)
+ * @param accessToken - The access token from Supabase password reset redirect
+ */
+export const verifyResetToken = async (accessToken: string): Promise<{ valid: boolean; email?: string }> => {
+  if (!accessToken) {
+    return { valid: false };
+  }
+
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabaseUrl = process.env.SUPABASE_URL!;
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY!;
+
+    // Create a client with the access token in the header to verify it
+    const userSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+      global: {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      },
+    });
+
+    // Verify token by getting user info - this validates the JWT
+    const { data: userData, error } = await userSupabase.auth.getUser();
+
+    if (error || !userData?.user) {
+      console.error('Token verification error:', error);
+      return { valid: false };
+    }
+
+    return {
+      valid: true,
+      email: userData.user.email,
+    };
+  } catch (error) {
+    console.error('Token verification exception:', error);
+    return { valid: false };
+  }
+};

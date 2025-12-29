@@ -52,10 +52,10 @@ BEGIN
     AND (
       p_search IS NULL 
       OR p_search = ''
-      OR p.pharmacy_name ILIKE '%' || p_search || '%'
-      OR p.name ILIKE '%' || p_search || '%'
-      OR ud.id::text ILIKE '%' || p_search || '%'
-      OR rd.name ILIKE '%' || p_search || '%'
+      OR p.pharmacy_name ILIKE p_search || '%'
+      OR p.name ILIKE p_search || '%'
+      OR ud.id::text ILIKE p_search || '%'
+      OR rd.name ILIKE p_search || '%'
     )
     AND (p_pharmacy_id IS NULL OR ud.pharmacy_id = p_pharmacy_id);
 
@@ -102,10 +102,10 @@ BEGIN
     AND (
       p_search IS NULL 
       OR p_search = ''
-      OR p.pharmacy_name ILIKE '%' || p_search || '%'
-      OR p.name ILIKE '%' || p_search || '%'
-      OR ud.id::text ILIKE '%' || p_search || '%'
-      OR rd.name ILIKE '%' || p_search || '%'
+      OR p.pharmacy_name ILIKE p_search || '%'
+      OR p.name ILIKE p_search || '%'
+      OR ud.id::text ILIKE p_search || '%'
+      OR rd.name ILIKE p_search || '%'
     )
     AND (p_pharmacy_id IS NULL OR ud.pharmacy_id = p_pharmacy_id)
   LIMIT p_limit
