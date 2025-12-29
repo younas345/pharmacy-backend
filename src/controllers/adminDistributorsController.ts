@@ -6,6 +6,7 @@ import {
   updateDistributor,
   updateDistributorStatus,
   deleteDistributor,
+  getDistributorUniqueProducts,
 } from '../services/adminDistributorsService';
 import { AppError } from '../utils/appError';
 
@@ -281,6 +282,37 @@ export const deleteDistributorHandler = async (
     res.status(200).json({
       status: 'success',
       message: result.message,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get unique products for a distributor
+ * GET /api/admin/distributors/:id/products
+ */
+export const getDistributorProductsHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { id } = req.params;
+    const { page = '1', limit = '50' } = req.query;
+
+    if (!id) {
+      throw new AppError('Distributor ID is required', 400);
+    }
+
+    const pageNum = parseInt(page as string, 10) || 1;
+    const limitNum = Math.min(parseInt(limit as string, 10) || 50, 100); // Max 100
+
+    const result = await getDistributorUniqueProducts(id, pageNum, limitNum);
+
+    res.status(200).json({
+      status: 'success',
       data: result,
     });
   } catch (error) {

@@ -6,6 +6,7 @@ import {
   updateDistributorHandler,
   updateDistributorStatusHandler,
   deleteDistributorHandler,
+  getDistributorProductsHandler,
 } from '../controllers/adminDistributorsController';
 import { authenticateAdmin } from '../middleware/adminAuth';
 
@@ -291,6 +292,134 @@ router.get('/', getDistributorsHandler);
  *         description: Internal server error
  */
 router.get('/:id', getDistributorByIdHandler);
+
+/**
+ * @swagger
+ * /api/admin/distributors/{id}/products:
+ *   get:
+ *     summary: Get unique products for a distributor
+ *     description: |
+ *       Returns unique products (by NDC) for a specific distributor.
+ *       Only the latest record per NDC based on report_date is returned.
+ *     tags: [Admin - Distributors]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Distributor ID
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 100
+ *         description: Items per page (max 100)
+ *     responses:
+ *       200:
+ *         description: Unique products for the distributor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     distributor:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: string
+ *                           format: uuid
+ *                         name:
+ *                           type: string
+ *                     products:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           reportId:
+ *                             type: string
+ *                             format: uuid
+ *                           ndcCode:
+ *                             type: string
+ *                             example: "16729-0317-01"
+ *                           productName:
+ *                             type: string
+ *                             example: "Oxybutynin 5mg ER Tablet"
+ *                           manufacturer:
+ *                             type: string
+ *                             example: "ACCORD HEALTHCARE"
+ *                           creditAmount:
+ *                             type: number
+ *                             example: 1.94
+ *                           pricePerUnit:
+ *                             type: number
+ *                             example: 1.94
+ *                           quantity:
+ *                             type: integer
+ *                             example: 1
+ *                           fullUnits:
+ *                             type: integer
+ *                             example: 1
+ *                           partialUnits:
+ *                             type: integer
+ *                             example: 0
+ *                           lotNumber:
+ *                             type: string
+ *                             example: "M2215878"
+ *                           expirationDate:
+ *                             type: string
+ *                             example: "2025-10-31"
+ *                           packageSize:
+ *                             type: string
+ *                             example: "100"
+ *                           reportDate:
+ *                             type: string
+ *                             format: date
+ *                             example: "2025-09-04"
+ *                           fileName:
+ *                             type: string
+ *                             example: "returnreports-9_4_25.pdf"
+ *                           pharmacyId:
+ *                             type: string
+ *                             format: uuid
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         page:
+ *                           type: integer
+ *                         limit:
+ *                           type: integer
+ *                         total:
+ *                           type: integer
+ *                         totalPages:
+ *                           type: integer
+ *                     generatedAt:
+ *                       type: string
+ *                       format: date-time
+ *       401:
+ *         description: Unauthorized - Invalid or missing admin token
+ *       404:
+ *         description: Distributor not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/:id/products', getDistributorProductsHandler);
 
 /**
  * @swagger

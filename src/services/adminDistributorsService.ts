@@ -83,6 +83,39 @@ export interface UpdateDistributorData {
   specializations?: string[];
 }
 
+export interface UniqueProductItem {
+  reportId: string;
+  ndcCode: string;
+  productName: string;
+  manufacturer: string;
+  creditAmount: number;
+  pricePerUnit: number;
+  quantity: number;
+  fullUnits: number;
+  partialUnits: number;
+  lotNumber: string;
+  expirationDate: string;
+  packageSize: string;
+  reportDate: string;
+  fileName: string;
+  pharmacyId: string;
+}
+
+export interface DistributorUniqueProductsResponse {
+  distributor: {
+    id: string;
+    name: string;
+  };
+  products: UniqueProductItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  generatedAt: string;
+}
+
 // ============================================================
 // Service Functions
 // ============================================================
@@ -267,4 +300,34 @@ export const deleteDistributor = async (
   }
 
   return data;
+};
+
+/**
+ * Get unique products for a distributor
+ * Returns unique NDCs with only the latest record per NDC based on report_date
+ * Uses PostgreSQL RPC function - no custom JS logic
+ */
+export const getDistributorUniqueProducts = async (
+  distributorId: string,
+  page: number = 1,
+  limit: number = 50
+): Promise<DistributorUniqueProductsResponse> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('get_distributor_unique_products', {
+    p_distributor_id: distributorId,
+    p_page: page,
+    p_limit: limit,
+  });
+
+  if (error) {
+    if (error.message.includes('not found')) {
+      throw new AppError('Distributor not found', 404);
+    }
+    throw new AppError(`Failed to fetch distributor products: ${error.message}`, 400);
+  }
+
+  return data as DistributorUniqueProductsResponse;
 };

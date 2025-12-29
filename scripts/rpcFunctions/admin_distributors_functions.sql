@@ -130,6 +130,22 @@ BEGIN
             COALESCE(rd.specializations, ARRAY[]::TEXT[]) AS specializations,
             -- Count total deals (packages) for this distributor
             (SELECT COUNT(*)::INTEGER FROM custom_packages cp WHERE cp.distributor_id = rd.id) AS "totalDeals",
+            -- Count unique products (NDCs) from return_reports, only latest report_date per NDC
+            (
+                SELECT COUNT(DISTINCT latest_ndc.ndc)::INTEGER
+                FROM (
+                    -- Get the latest report_date for each NDC for this distributor
+                    SELECT 
+                        rr.data->>'ndcCode' AS ndc,
+                        MAX(ud.report_date) AS latest_report_date
+                    FROM uploaded_documents ud
+                    INNER JOIN return_reports rr ON rr.document_id = ud.id
+                    WHERE ud.reverse_distributor_id = rd.id
+                      AND rr.data->>'ndcCode' IS NOT NULL
+                      AND rr.data->>'ndcCode' != ''
+                    GROUP BY rr.data->>'ndcCode'
+                ) AS latest_ndc
+            ) AS "uniqueProductsCount",
             rd.created_at AS "createdAt"
         FROM reverse_distributors rd
         WHERE 
@@ -199,6 +215,7 @@ DECLARE
     v_result JSONB;
     v_distributor JSONB;
     v_total_deals INTEGER;
+    v_unique_products_count INTEGER;
 BEGIN
     -- Check if distributor exists
     IF NOT EXISTS (SELECT 1 FROM reverse_distributors WHERE id = p_distributor_id) THEN
@@ -209,6 +226,20 @@ BEGIN
     SELECT COUNT(*)::INTEGER INTO v_total_deals
     FROM custom_packages
     WHERE distributor_id = p_distributor_id;
+    
+    -- Get unique products count (unique NDCs, latest report_date per NDC)
+    SELECT COUNT(DISTINCT latest_ndc.ndc)::INTEGER INTO v_unique_products_count
+    FROM (
+        SELECT 
+            rr.data->>'ndcCode' AS ndc,
+            MAX(ud.report_date) AS latest_report_date
+        FROM uploaded_documents ud
+        INNER JOIN return_reports rr ON rr.document_id = ud.id
+        WHERE ud.reverse_distributor_id = p_distributor_id
+          AND rr.data->>'ndcCode' IS NOT NULL
+          AND rr.data->>'ndcCode' != ''
+        GROUP BY rr.data->>'ndcCode'
+    ) AS latest_ndc;
     
     -- Get distributor details
     SELECT jsonb_build_object(
@@ -225,6 +256,7 @@ BEGIN
         'licenseNumber', COALESCE(rd.license_number, ''),
         'specializations', COALESCE(rd.specializations, ARRAY[]::TEXT[]),
         'totalDeals', v_total_deals,
+        'uniqueProductsCount', COALESCE(v_unique_products_count, 0),
         'code', COALESCE(rd.code, ''),
         'portalUrl', COALESCE(rd.portal_url, ''),
         'supportedFormats', COALESCE(rd.supported_formats, ARRAY[]::TEXT[]),
@@ -514,3 +546,151 @@ $$;
 
 GRANT EXECUTE ON FUNCTION delete_admin_distributor(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION delete_admin_distributor(UUID) TO service_role;
+
+-- ============================================================
+-- 8. GET DISTRIBUTOR UNIQUE PRODUCTS
+-- Returns unique products (by NDC) for a distributor
+-- Only the latest record per NDC based on report_date
+-- ============================================================
+
+DROP FUNCTION IF EXISTS get_distributor_unique_products(UUID, INTEGER, INTEGER);
+
+CREATE OR REPLACE FUNCTION get_distributor_unique_products(
+    p_distributor_id UUID,
+    p_page INTEGER DEFAULT 1,
+    p_limit INTEGER DEFAULT 50
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_result JSONB;
+    v_products JSONB;
+    v_total_count INTEGER;
+    v_offset INTEGER;
+    v_distributor_name TEXT;
+BEGIN
+    -- Check if distributor exists
+    IF NOT EXISTS (SELECT 1 FROM reverse_distributors WHERE id = p_distributor_id) THEN
+        RAISE EXCEPTION 'Distributor not found';
+    END IF;
+    
+    -- Get distributor name
+    SELECT name INTO v_distributor_name
+    FROM reverse_distributors
+    WHERE id = p_distributor_id;
+    
+    -- Calculate offset
+    v_offset := (p_page - 1) * p_limit;
+    
+    -- Get total count of unique NDCs
+    SELECT COUNT(*)::INTEGER INTO v_total_count
+    FROM (
+        SELECT DISTINCT rr.data->>'ndcCode' AS ndc
+        FROM uploaded_documents ud
+        INNER JOIN return_reports rr ON rr.document_id = ud.id
+        WHERE ud.reverse_distributor_id = p_distributor_id
+          AND rr.data->>'ndcCode' IS NOT NULL
+          AND rr.data->>'ndcCode' != ''
+    ) AS unique_ndcs;
+    
+    -- Get unique products with latest report_date per NDC
+    WITH latest_reports AS (
+        -- Find the latest report_date for each NDC
+        SELECT 
+            rr.data->>'ndcCode' AS ndc,
+            MAX(ud.report_date) AS latest_report_date
+        FROM uploaded_documents ud
+        INNER JOIN return_reports rr ON rr.document_id = ud.id
+        WHERE ud.reverse_distributor_id = p_distributor_id
+          AND rr.data->>'ndcCode' IS NOT NULL
+          AND rr.data->>'ndcCode' != ''
+        GROUP BY rr.data->>'ndcCode'
+    ),
+    latest_products AS (
+        -- Get the full product details for the latest report per NDC
+        SELECT DISTINCT ON (rr.data->>'ndcCode')
+            rr.id AS "reportId",
+            rr.data->>'ndcCode' AS "ndcCode",
+            rr.data->>'itemName' AS "productName",
+            rr.data->>'manufacturer' AS manufacturer,
+            COALESCE((rr.data->>'creditAmount')::NUMERIC, 0) AS "creditAmount",
+            -- Calculate pricePerUnit: use from data if exists, otherwise creditAmount / quantity
+            COALESCE(
+                (rr.data->>'pricePerUnit')::NUMERIC,
+                CASE 
+                    WHEN COALESCE((rr.data->>'quantity')::INTEGER, 1) > 0 
+                    THEN COALESCE((rr.data->>'creditAmount')::NUMERIC, 0) / GREATEST(COALESCE((rr.data->>'quantity')::INTEGER, 1), 1)
+                    ELSE 0 
+                END
+            ) AS "pricePerUnit",
+            -- Calculate quantity: use from data if exists, otherwise full + partial
+            COALESCE(
+                (rr.data->>'quantity')::INTEGER,
+                COALESCE((rr.data->>'full')::INTEGER, 0) + COALESCE((rr.data->>'partial')::INTEGER, 0)
+            ) AS quantity,
+            COALESCE((rr.data->>'full')::INTEGER, 0) AS "fullUnits",
+            COALESCE((rr.data->>'partial')::INTEGER, 0) AS "partialUnits",
+            rr.data->>'lotNumber' AS "lotNumber",
+            rr.data->>'expirationDate' AS "expirationDate",
+            rr.data->>'pkgSz' AS "packageSize",
+            ud.report_date AS "reportDate",
+            ud.file_name AS "fileName",
+            rr.pharmacy_id AS "pharmacyId"
+        FROM uploaded_documents ud
+        INNER JOIN return_reports rr ON rr.document_id = ud.id
+        INNER JOIN latest_reports lr ON lr.ndc = rr.data->>'ndcCode' AND lr.latest_report_date = ud.report_date
+        WHERE ud.reverse_distributor_id = p_distributor_id
+        ORDER BY rr.data->>'ndcCode', ud.report_date DESC, rr.id
+    )
+    SELECT COALESCE(jsonb_agg(
+        jsonb_build_object(
+            'reportId', lp."reportId",
+            'ndcCode', lp."ndcCode",
+            'productName', lp."productName",
+            'manufacturer', lp.manufacturer,
+            'creditAmount', ROUND(lp."creditAmount", 2),
+            'pricePerUnit', ROUND(lp."pricePerUnit", 2),
+            'quantity', lp.quantity,
+            'fullUnits', lp."fullUnits",
+            'partialUnits', lp."partialUnits",
+            'lotNumber', lp."lotNumber",
+            'expirationDate', lp."expirationDate",
+            'packageSize', lp."packageSize",
+            'reportDate', lp."reportDate",
+            'fileName', lp."fileName",
+            'pharmacyId', lp."pharmacyId"
+        )
+        ORDER BY lp."reportDate" DESC, lp."productName"
+    ), '[]'::JSONB)
+    INTO v_products
+    FROM (
+        SELECT * FROM latest_products
+        ORDER BY "reportDate" DESC, "productName"
+        LIMIT p_limit
+        OFFSET v_offset
+    ) lp;
+    
+    -- Build result
+    v_result := jsonb_build_object(
+        'distributor', jsonb_build_object(
+            'id', p_distributor_id,
+            'name', v_distributor_name
+        ),
+        'products', v_products,
+        'pagination', jsonb_build_object(
+            'page', p_page,
+            'limit', p_limit,
+            'total', v_total_count,
+            'totalPages', CEIL(v_total_count::NUMERIC / p_limit::NUMERIC)::INTEGER
+        ),
+        'generatedAt', NOW()
+    );
+    
+    RETURN v_result;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION get_distributor_unique_products(UUID, INTEGER, INTEGER) TO authenticated;
+GRANT EXECUTE ON FUNCTION get_distributor_unique_products(UUID, INTEGER, INTEGER) TO service_role;
