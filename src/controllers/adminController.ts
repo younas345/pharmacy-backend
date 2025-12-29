@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { adminLogin } from '../services/adminService';
+import { adminLogin, adminForgotPassword, adminVerifyResetToken, adminResetPassword } from '../services/adminService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
 
@@ -98,6 +98,83 @@ export const loginHandler = catchAsync(
       accessToken: result.accessToken,
       access_token: result.access_token,
       user: result.user,
+    });
+  }
+);
+
+/**
+ * Admin forgot password handler
+ * POST /api/auth/admin/forgot-password
+ * Uses Supabase's built-in email service (same as pharmacy)
+ */
+export const adminForgotPasswordHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { email, redirectTo } = req.body;
+
+    if (!email) {
+      throw new AppError('Email is required', 400);
+    }
+
+    // Uses Supabase's built-in email service (same as pharmacy)
+    const result = await adminForgotPassword(email, redirectTo);
+
+    res.status(200).json({
+      status: 'success',
+      message: result.message,
+    });
+  }
+);
+
+/**
+ * Admin verify reset token handler
+ * POST /api/auth/admin/verify-reset-token
+ * Uses Supabase Auth (same as pharmacy)
+ */
+export const adminVerifyResetTokenHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { token, accessToken } = req.body;
+    const tokenToVerify = accessToken || token;
+
+    if (!tokenToVerify) {
+      throw new AppError('Reset token is required', 400);
+    }
+
+    const result = await adminVerifyResetToken(tokenToVerify);
+
+    res.status(200).json({
+      status: 'success',
+      data: result,
+    });
+  }
+);
+
+/**
+ * Admin reset password handler
+ * POST /api/auth/admin/reset-password
+ * Uses Supabase Auth (same as pharmacy)
+ */
+export const adminResetPasswordHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { token, accessToken, newPassword } = req.body;
+    const tokenToUse = accessToken || token;
+
+    if (!tokenToUse) {
+      throw new AppError('Reset token is required', 400);
+    }
+
+    if (!newPassword) {
+      throw new AppError('New password is required', 400);
+    }
+
+    if (newPassword.length < 8) {
+      throw new AppError('Password must be at least 8 characters long', 400);
+    }
+
+    const result = await adminResetPassword(tokenToUse, newPassword);
+
+    res.status(200).json({
+      status: 'success',
+      message: result.message,
     });
   }
 );

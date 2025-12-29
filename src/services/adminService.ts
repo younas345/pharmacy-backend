@@ -1,9 +1,12 @@
-import { supabaseAdmin } from '../config/supabase';
+import { supabase, supabaseAdmin } from '../config/supabase';
 import { AppError } from '../utils/appError';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 const db = supabaseAdmin || null;
+
+// Get the admin client for auth operations
+const authAdmin = supabaseAdmin?.auth?.admin;
 
 // JWT configuration
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'your-secret-key-change-in-production';
@@ -108,6 +111,231 @@ export const adminLogin = async (data: AdminLoginData): Promise<AdminAuthRespons
     expiresIn: JWT_EXPIRES_IN_SECONDS,
     expiresAt,
   };
+};
+
+/**
+ * Request password reset for admin
+ * Uses Supabase's built-in email service (same as pharmacy)
+ */
+export const adminForgotPassword = async (email: string, redirectTo?: string): Promise<{
+  message: string;
+}> => {
+  if (!db || !supabase) {
+    throw new AppError('Database connection not configured', 500);
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // Step 1: Check if admin exists with this email
+  const { data: adminData, error: adminError } = await db
+    .from('admin')
+    .select('id, email, name, is_active')
+    .eq('email', normalizedEmail)
+    .single();
+
+  if (adminError || !adminData) {
+    // Don't reveal if email exists or not for security
+    return {
+      message: 'If an account with this email exists, a password reset link has been sent.',
+    };
+  }
+
+  // Check if admin is active
+  if (!adminData.is_active) {
+    throw new AppError('This account has been deactivated. Please contact support.', 403);
+  }
+
+  // Step 2: Check if there's already an auth user for this email
+  // If not, create one so we can use Supabase's password reset email
+  if (authAdmin) {
+    const { data: authUsers } = await authAdmin.listUsers();
+    const existingAuthUser = authUsers?.users?.find(u => u.email === normalizedEmail);
+
+    if (!existingAuthUser) {
+      // Create a shadow auth user for this admin
+      // This allows us to use Supabase's built-in email service
+      const tempPassword = `temp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const { error: createError } = await authAdmin.createUser({
+        email: normalizedEmail,
+        password: tempPassword,
+        email_confirm: true,
+        user_metadata: {
+          name: adminData.name,
+          is_admin: true,
+          admin_id: adminData.id,
+        },
+      });
+
+      if (createError) {
+        console.error('Failed to create shadow auth user:', createError);
+        // Continue anyway - might already exist
+      }
+    }
+  }
+
+  // Step 3: Send password reset email via Supabase (same as pharmacy)
+  const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+    redirectTo: redirectTo || process.env.ADMIN_PASSWORD_RESET_REDIRECT_URL || 'http://localhost:3002/reset-password',
+  });
+
+  if (resetError) {
+    console.error('Supabase password reset error:', resetError);
+    throw new AppError('Failed to send password reset email. Please try again later.', 500);
+  }
+
+  return {
+    message: 'If an account with this email exists, a password reset link has been sent.',
+  };
+};
+
+/**
+ * Verify admin reset token (using Supabase Auth - same as pharmacy)
+ */
+export const adminVerifyResetToken = async (accessToken: string): Promise<{
+  valid: boolean;
+  email?: string;
+  name?: string;
+  message?: string;
+}> => {
+  if (!supabase) {
+    throw new AppError('Supabase client not configured', 500);
+  }
+
+  try {
+    // Verify the token using Supabase
+    const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
+
+    if (userError || !userData?.user) {
+      return {
+        valid: false,
+        message: 'Invalid or expired reset token',
+      };
+    }
+
+    // Check if this user is an admin
+    if (!db) {
+      throw new AppError('Database connection not configured', 500);
+    }
+
+    const { data: adminData, error: adminError } = await db
+      .from('admin')
+      .select('id, email, name, is_active')
+      .eq('email', userData.user.email)
+      .single();
+
+    if (adminError || !adminData) {
+      return {
+        valid: false,
+        message: 'No admin account found with this email',
+      };
+    }
+
+    if (!adminData.is_active) {
+      return {
+        valid: false,
+        message: 'This admin account has been deactivated',
+      };
+    }
+
+    return {
+      valid: true,
+      email: adminData.email,
+      name: adminData.name,
+    };
+  } catch (error: any) {
+    console.error('Admin verify token error:', error);
+    return {
+      valid: false,
+      message: 'Failed to verify reset token',
+    };
+  }
+};
+
+/**
+ * Reset admin password using Supabase Auth (same as pharmacy)
+ */
+export const adminResetPassword = async (accessToken: string, newPassword: string): Promise<{
+  success: boolean;
+  message: string;
+}> => {
+  if (!supabase || !db) {
+    throw new AppError('Database connection not configured', 500);
+  }
+
+  // Validate password
+  if (!newPassword || newPassword.length < 8) {
+    throw new AppError('Password must be at least 8 characters long', 400);
+  }
+
+  try {
+    // Step 1: Verify the token and get user info
+    const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
+
+    if (userError || !userData?.user) {
+      throw new AppError('Invalid or expired reset link. Please request a new password reset.', 400);
+    }
+
+    const userEmail = userData.user.email;
+
+    if (!userEmail) {
+      throw new AppError('Unable to verify user email', 400);
+    }
+
+    // Step 2: Check if this is an admin
+    const { data: adminData, error: adminError } = await db
+      .from('admin')
+      .select('id, email, is_active')
+      .eq('email', userEmail)
+      .single();
+
+    if (adminError || !adminData) {
+      throw new AppError('No admin account found with this email', 404);
+    }
+
+    if (!adminData.is_active) {
+      throw new AppError('This admin account has been deactivated', 403);
+    }
+
+    // Step 3: Update password in Supabase Auth
+    if (supabaseAdmin?.auth?.admin) {
+      const { error: updateAuthError } = await supabaseAdmin.auth.admin.updateUserById(
+        userData.user.id,
+        { password: newPassword }
+      );
+
+      if (updateAuthError) {
+        console.error('Failed to update Supabase Auth password:', updateAuthError);
+        // Continue to update admin table anyway
+      }
+    }
+
+    // Step 4: Update password in admin table
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    const { error: updateError } = await db
+      .from('admin')
+      .update({
+        password_hash: passwordHash,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', adminData.id);
+
+    if (updateError) {
+      console.error('Failed to update admin password:', updateError);
+      throw new AppError('Failed to update password. Please try again.', 500);
+    }
+
+    return {
+      success: true,
+      message: 'Password has been reset successfully. You can now log in with your new password.',
+    };
+  } catch (error: any) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    console.error('Admin reset password error:', error);
+    throw new AppError('Failed to reset password. Please try again or request a new reset link.', 500);
+  }
 };
 
 /**

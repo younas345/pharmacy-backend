@@ -206,7 +206,7 @@ export const getProductListItems = async (pharmacyId: string): Promise<ProductLi
     if (pkgItem.product_id) {
       if (!usedQuantityByProductId[pkgItem.product_id]) {
         usedQuantityByProductId[pkgItem.product_id] = { full: 0, partial: 0 };
-      }
+    }
       // Track full and partial separately
       usedQuantityByProductId[pkgItem.product_id].full += (pkgItem.full || 0);
       usedQuantityByProductId[pkgItem.product_id].partial += (pkgItem.partial || 0);

@@ -747,17 +747,17 @@ export const getOptimizationRecommendations = async (
         // A record is for FULL if full > 0 and partial = 0
         // A record is for PARTIAL if partial > 0 and full = 0
         // This is essential for non-search mode when same NDC has both full and partial inventory items
-        const isFullRecord = itemFull > 0 && itemPartial === 0;
-        const isPartialRecord = itemPartial > 0 && itemFull === 0;
-        
-        if (isFullRecord && !distributorNdcToFullPriceMap[distributorNdcKey]) {
-          distributorNdcToFullPriceMap[distributorNdcKey] = pricePerUnit;
-          console.log(`   💰 FULL price for ${distributorName}|${actualNdcKey}: ${pricePerUnit}`);
-        }
-        
-        if (isPartialRecord && !distributorNdcToPartialPriceMap[distributorNdcKey]) {
-          distributorNdcToPartialPriceMap[distributorNdcKey] = pricePerUnit;
-          console.log(`   💰 PARTIAL price for ${distributorName}|${actualNdcKey}: ${pricePerUnit}`);
+          const isFullRecord = itemFull > 0 && itemPartial === 0;
+          const isPartialRecord = itemPartial > 0 && itemFull === 0;
+          
+          if (isFullRecord && !distributorNdcToFullPriceMap[distributorNdcKey]) {
+            distributorNdcToFullPriceMap[distributorNdcKey] = pricePerUnit;
+            console.log(`   💰 FULL price for ${distributorName}|${actualNdcKey}: ${pricePerUnit}`);
+          }
+          
+          if (isPartialRecord && !distributorNdcToPartialPriceMap[distributorNdcKey]) {
+            distributorNdcToPartialPriceMap[distributorNdcKey] = pricePerUnit;
+            console.log(`   💰 PARTIAL price for ${distributorName}|${actualNdcKey}: ${pricePerUnit}`);
         }
         
         console.log(`✅ Matched NDC ${actualNdcKey} (search term: ${matchingNdc}) with distributor "${distributorName}", price: ${pricePerUnit}, full=${itemFull}, partial=${itemPartial}`);
@@ -1026,7 +1026,7 @@ export const getOptimizationRecommendations = async (
     // An item with partial_units > 0 needs PARTIAL price records from return_reports
     const needsFullPrice = fullPartial.full > 0;
     const needsPartialPrice = fullPartial.partial > 0;
-    
+
     // Calculate price per distributor
     // IMPORTANT: Only use prices that match the inventory item's unit type
     // If no matching price exists, that distributor should NOT be recommended
@@ -1069,7 +1069,7 @@ export const getOptimizationRecommendations = async (
             if (fullPrice > 0) {
               price = fullPrice;
               console.log(`   💰 Using FULL price for full-unit item ${distributorName}|${ndc}: ${price}`);
-            } else {
+          } else {
               price = 0; // No full price record exists - this distributor won't be recommended
               console.log(`   ❌ No FULL price for ${distributorName}|${ndc} - distributor not available for full units`);
             }
