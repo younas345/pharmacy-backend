@@ -111,6 +111,91 @@ export const adminLogin = async (data: AdminLoginData): Promise<AdminAuthRespons
 };
 
 /**
+ * Request password reset for admin
+ * Generates a reset token and returns it (to be sent via email)
+ */
+export const adminForgotPassword = async (email: string): Promise<{
+  success: boolean;
+  message: string;
+  resetToken?: string;
+  adminName?: string;
+  adminEmail?: string;
+}> => {
+  if (!db) {
+    throw new AppError('Database connection not configured', 500);
+  }
+
+  const { data, error } = await db.rpc('admin_request_password_reset', {
+    p_email: email,
+  });
+
+  if (error) {
+    throw new AppError(`Failed to process password reset: ${error.message}`, 400);
+  }
+
+  return data;
+};
+
+/**
+ * Verify admin reset token
+ */
+export const adminVerifyResetToken = async (token: string): Promise<{
+  valid: boolean;
+  email?: string;
+  name?: string;
+  message?: string;
+}> => {
+  if (!db) {
+    throw new AppError('Database connection not configured', 500);
+  }
+
+  const { data, error } = await db.rpc('admin_verify_reset_token', {
+    p_token: token,
+  });
+
+  if (error) {
+    throw new AppError(`Failed to verify reset token: ${error.message}`, 400);
+  }
+
+  return data;
+};
+
+/**
+ * Reset admin password using reset token
+ */
+export const adminResetPassword = async (token: string, newPassword: string): Promise<{
+  success: boolean;
+  message: string;
+}> => {
+  if (!db) {
+    throw new AppError('Database connection not configured', 500);
+  }
+
+  // Validate password
+  if (!newPassword || newPassword.length < 8) {
+    throw new AppError('Password must be at least 8 characters long', 400);
+  }
+
+  // Hash the new password
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+
+  const { data, error } = await db.rpc('admin_reset_password', {
+    p_token: token,
+    p_password_hash: passwordHash,
+  });
+
+  if (error) {
+    throw new AppError(`Failed to reset password: ${error.message}`, 400);
+  }
+
+  if (!data.success) {
+    throw new AppError(data.message || 'Failed to reset password', 400);
+  }
+
+  return data;
+};
+
+/**
  * Verify admin JWT token
  * Used for authentication middleware
  */

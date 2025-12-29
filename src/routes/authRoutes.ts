@@ -1,6 +1,6 @@
 import express from 'express';
 import { signupHandler, signinHandler, refreshTokenHandler, logoutHandler, logoutAllHandler, forgotPasswordHandler, resetPasswordHandler, verifyResetTokenHandler } from '../controllers/authController';
-import { loginHandler } from '../controllers/adminController';
+import { loginHandler, adminForgotPasswordHandler, adminVerifyResetTokenHandler, adminResetPasswordHandler } from '../controllers/adminController';
 import { authenticate } from '../middleware/auth';
 
 const router = express.Router();
@@ -500,5 +500,146 @@ router.post('/reset-password', resetPasswordHandler);
  *                       example: pharmacy@example.com
  */
 router.post('/verify-reset-token', verifyResetTokenHandler);
+
+// ============================================================
+// Admin Password Reset Routes
+// ============================================================
+
+/**
+ * @swagger
+ * /api/auth/admin/forgot-password:
+ *   post:
+ *     summary: Request password reset for admin user
+ *     description: Sends a password reset link to the admin's email address. For security, always returns success even if email doesn't exist.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: admin@pharmadmin.com
+ *               redirectTo:
+ *                 type: string
+ *                 format: url
+ *                 description: Optional URL to redirect to after password reset
+ *                 example: http://localhost:3002/reset-password
+ *     responses:
+ *       200:
+ *         description: Password reset request processed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: If an account with this email exists, a password reset link has been sent.
+ *       400:
+ *         description: Bad request - email not provided
+ */
+router.post('/admin/forgot-password', adminForgotPasswordHandler);
+
+/**
+ * @swagger
+ * /api/auth/admin/verify-reset-token:
+ *   post:
+ *     summary: Verify admin password reset token
+ *     description: Checks if a password reset token is valid and not expired
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *             properties:
+ *               token:
+ *                 type: string
+ *                 description: The password reset token
+ *                 example: abc123def456...
+ *     responses:
+ *       200:
+ *         description: Token verification result
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     valid:
+ *                       type: boolean
+ *                       example: true
+ *                     email:
+ *                       type: string
+ *                       example: admin@pharmadmin.com
+ *                     name:
+ *                       type: string
+ *                       example: Admin User
+ *       400:
+ *         description: Bad request - token not provided
+ */
+router.post('/admin/verify-reset-token', adminVerifyResetTokenHandler);
+
+/**
+ * @swagger
+ * /api/auth/admin/reset-password:
+ *   post:
+ *     summary: Reset admin password using reset token
+ *     description: Sets a new password for the admin user using the reset token
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *               - newPassword
+ *             properties:
+ *               token:
+ *                 type: string
+ *                 description: The password reset token
+ *                 example: abc123def456...
+ *               newPassword:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 8
+ *                 example: NewSecurePassword123!
+ *     responses:
+ *       200:
+ *         description: Password reset successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Password has been reset successfully. You can now login with your new password.
+ *       400:
+ *         description: Bad request - invalid token or password
+ */
+router.post('/admin/reset-password', adminResetPasswordHandler);
 
 export default router;

@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { adminLogin } from '../services/adminService';
+import { adminLogin, adminForgotPassword, adminVerifyResetToken, adminResetPassword } from '../services/adminService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
 
@@ -98,6 +98,91 @@ export const loginHandler = catchAsync(
       accessToken: result.accessToken,
       access_token: result.access_token,
       user: result.user,
+    });
+  }
+);
+
+/**
+ * Admin forgot password handler
+ * POST /api/auth/admin/forgot-password
+ */
+export const adminForgotPasswordHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { email, redirectTo } = req.body;
+
+    if (!email) {
+      throw new AppError('Email is required', 400);
+    }
+
+    const result = await adminForgotPassword(email);
+
+    // If we have a reset token, we should send an email
+    // For now, we just return success (email sending can be implemented separately)
+    if (result.resetToken) {
+      const baseUrl = redirectTo || process.env.ADMIN_PASSWORD_RESET_REDIRECT_URL || 'http://localhost:3002/reset-password';
+      const resetLink = `${baseUrl}?token=${result.resetToken}`;
+      
+      // TODO: Send email with resetLink
+      // For now, log it in development
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[Admin Password Reset] Reset link for ${email}: ${resetLink}`);
+      }
+    }
+
+    // Always return success for security (don't reveal if email exists)
+    res.status(200).json({
+      status: 'success',
+      message: result.message,
+    });
+  }
+);
+
+/**
+ * Admin verify reset token handler
+ * POST /api/auth/admin/verify-reset-token
+ */
+export const adminVerifyResetTokenHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { token } = req.body;
+
+    if (!token) {
+      throw new AppError('Reset token is required', 400);
+    }
+
+    const result = await adminVerifyResetToken(token);
+
+    res.status(200).json({
+      status: 'success',
+      data: result,
+    });
+  }
+);
+
+/**
+ * Admin reset password handler
+ * POST /api/auth/admin/reset-password
+ */
+export const adminResetPasswordHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { token, newPassword } = req.body;
+
+    if (!token) {
+      throw new AppError('Reset token is required', 400);
+    }
+
+    if (!newPassword) {
+      throw new AppError('New password is required', 400);
+    }
+
+    if (newPassword.length < 8) {
+      throw new AppError('Password must be at least 8 characters long', 400);
+    }
+
+    const result = await adminResetPassword(token, newPassword);
+
+    res.status(200).json({
+      status: 'success',
+      message: result.message,
     });
   }
 );
