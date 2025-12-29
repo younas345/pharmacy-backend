@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import { adminLogin, adminForgotPassword, adminVerifyResetToken, adminResetPassword } from '../services/adminService';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
-import { sendAdminPasswordResetEmail, isEmailConfigured } from '../services/emailService';
 
 /**
  * @swagger
@@ -106,6 +105,7 @@ export const loginHandler = catchAsync(
 /**
  * Admin forgot password handler
  * POST /api/auth/admin/forgot-password
+ * Uses Supabase's built-in email service (same as pharmacy)
  */
 export const adminForgotPasswordHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -115,35 +115,9 @@ export const adminForgotPasswordHandler = catchAsync(
       throw new AppError('Email is required', 400);
     }
 
-    const result = await adminForgotPassword(email);
+    // Uses Supabase's built-in email service (same as pharmacy)
+    const result = await adminForgotPassword(email, redirectTo);
 
-    // If we have a reset token, send an email
-    if (result.resetToken && result.adminName && result.adminEmail) {
-      const baseUrl = redirectTo || process.env.ADMIN_PASSWORD_RESET_REDIRECT_URL || 'http://localhost:3002/reset-password';
-      const resetLink = `${baseUrl}?token=${result.resetToken}`;
-      
-      // Log the reset link for debugging (always log for now)
-      console.log(`[Admin Password Reset] Reset link for ${email}: ${resetLink}`);
-      
-      // Send email if SMTP is configured
-      if (isEmailConfigured()) {
-        const emailSent = await sendAdminPasswordResetEmail(
-          result.adminEmail,
-          result.adminName,
-          resetLink
-        );
-        
-        if (emailSent) {
-          console.log(`[Admin Password Reset] Email sent successfully to ${result.adminEmail}`);
-        } else {
-          console.error(`[Admin Password Reset] Failed to send email to ${result.adminEmail}`);
-        }
-      } else {
-        console.warn('[Admin Password Reset] SMTP not configured. Email not sent. Check the console for the reset link.');
-      }
-    }
-
-    // Always return success for security (don't reveal if email exists)
     res.status(200).json({
       status: 'success',
       message: result.message,
@@ -154,16 +128,18 @@ export const adminForgotPasswordHandler = catchAsync(
 /**
  * Admin verify reset token handler
  * POST /api/auth/admin/verify-reset-token
+ * Uses Supabase Auth (same as pharmacy)
  */
 export const adminVerifyResetTokenHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { token } = req.body;
+    const { token, accessToken } = req.body;
+    const tokenToVerify = accessToken || token;
 
-    if (!token) {
+    if (!tokenToVerify) {
       throw new AppError('Reset token is required', 400);
     }
 
-    const result = await adminVerifyResetToken(token);
+    const result = await adminVerifyResetToken(tokenToVerify);
 
     res.status(200).json({
       status: 'success',
@@ -175,12 +151,14 @@ export const adminVerifyResetTokenHandler = catchAsync(
 /**
  * Admin reset password handler
  * POST /api/auth/admin/reset-password
+ * Uses Supabase Auth (same as pharmacy)
  */
 export const adminResetPasswordHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { token, newPassword } = req.body;
+    const { token, accessToken, newPassword } = req.body;
+    const tokenToUse = accessToken || token;
 
-    if (!token) {
+    if (!tokenToUse) {
       throw new AppError('Reset token is required', 400);
     }
 
@@ -192,7 +170,7 @@ export const adminResetPasswordHandler = catchAsync(
       throw new AppError('Password must be at least 8 characters long', 400);
     }
 
-    const result = await adminResetPassword(token, newPassword);
+    const result = await adminResetPassword(tokenToUse, newPassword);
 
     res.status(200).json({
       status: 'success',

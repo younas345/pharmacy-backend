@@ -1,35 +1,21 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-// Email configuration from environment variables
-const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
-const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587', 10);
-const SMTP_SECURE = process.env.SMTP_SECURE === 'true'; // true for 465, false for other ports
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const EMAIL_FROM = process.env.EMAIL_FROM || SMTP_USER || 'noreply@pharmadmin.com';
-const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME || 'Pharma Collect';
+// Resend configuration (Supabase's recommended email service)
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const EMAIL_FROM = process.env.EMAIL_FROM || 'Pharma Collect <noreply@pharmadmin.com>';
 
-// Check if email is configured
+// Initialize Resend client
+let resend: Resend | null = null;
+
+if (RESEND_API_KEY) {
+  resend = new Resend(RESEND_API_KEY);
+}
+
+/**
+ * Check if email service is configured
+ */
 export const isEmailConfigured = (): boolean => {
-  return !!(SMTP_USER && SMTP_PASS);
-};
-
-// Create transporter
-const createTransporter = () => {
-  if (!isEmailConfigured()) {
-    console.warn('[EmailService] SMTP not configured. Set SMTP_USER and SMTP_PASS environment variables.');
-    return null;
-  }
-
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_SECURE,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-    },
-  });
+  return !!RESEND_API_KEY;
 };
 
 interface SendEmailOptions {
@@ -40,26 +26,40 @@ interface SendEmailOptions {
 }
 
 /**
- * Send an email
+ * Send an email using Resend (Supabase's recommended email service)
  */
 export const sendEmail = async (options: SendEmailOptions): Promise<boolean> => {
-  const transporter = createTransporter();
-  
-  if (!transporter) {
-    console.error('[EmailService] Cannot send email - SMTP not configured');
+  if (!resend) {
+    console.error('[EmailService] Cannot send email - RESEND_API_KEY not configured');
     return false;
   }
 
   try {
-    await transporter.sendMail({
-      from: `"${EMAIL_FROM_NAME}" <${EMAIL_FROM}>`,
+    // Build the email payload with proper types
+    const emailPayload: {
+      from: string;
+      to: string;
+      subject: string;
+      text?: string;
+      html?: string;
+    } = {
+      from: EMAIL_FROM,
       to: options.to,
       subject: options.subject,
-      text: options.text,
-      html: options.html,
-    });
-    
-    console.log(`[EmailService] Email sent successfully to ${options.to}`);
+    };
+
+    // Add text and html if provided
+    if (options.text) emailPayload.text = options.text;
+    if (options.html) emailPayload.html = options.html;
+
+    const { data, error } = await resend.emails.send(emailPayload as any);
+
+    if (error) {
+      console.error('[EmailService] Resend error:', error);
+      return false;
+    }
+
+    console.log(`[EmailService] Email sent successfully to ${options.to}, ID: ${data?.id}`);
     return true;
   } catch (error) {
     console.error('[EmailService] Failed to send email:', error);
@@ -76,7 +76,7 @@ export const sendAdminPasswordResetEmail = async (
   resetLink: string
 ): Promise<boolean> => {
   const subject = 'Reset Your Admin Password - Pharma Collect';
-  
+
   const html = `
     <!DOCTYPE html>
     <html>
@@ -152,7 +152,7 @@ If you didn't request this password reset, please ignore this email.
 };
 
 /**
- * Send pharmacy password reset email (using Supabase's built-in, but this is a fallback)
+ * Send pharmacy password reset email
  */
 export const sendPharmacyPasswordResetEmail = async (
   email: string,
@@ -160,7 +160,7 @@ export const sendPharmacyPasswordResetEmail = async (
   resetLink: string
 ): Promise<boolean> => {
   const subject = 'Reset Your Password - Pharma Collect';
-  
+
   const html = `
     <!DOCTYPE html>
     <html>
@@ -234,4 +234,3 @@ If you didn't request this password reset, please ignore this email.
     text,
   });
 };
-
