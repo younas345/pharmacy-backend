@@ -1,0 +1,194 @@
+import { Router } from 'express';
+import { getAdminRecentActivityHandler } from '../controllers/adminRecentActivityController';
+import { authenticateAdmin } from '../middleware/adminAuth';
+
+const router = Router();
+
+// Apply admin authentication middleware to all routes
+router.use(authenticateAdmin);
+
+/**
+ * @swagger
+ * /api/admin/recent-activity:
+ *   get:
+ *     summary: Get admin recent activity
+ *     description: |
+ *       Returns recent activity records for the admin dashboard including:
+ *       - Document uploads by pharmacies
+ *       - Product additions by pharmacies
+ *       
+ *       Activities are recorded automatically via database triggers when:
+ *       - A pharmacy uploads a new document
+ *       - A pharmacy adds a new product to their list
+ *       
+ *       Supports filtering by activity type and pharmacy ID.
+ *       Supports pagination via limit and offset parameters.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: activityType
+ *         schema:
+ *           type: string
+ *           enum: [document_uploaded, product_added]
+ *         description: Filter by activity type. If not provided, returns all types.
+ *         example: document_uploaded
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
+ *         description: Number of records to return (default 20, max 100)
+ *         example: 20
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           default: 0
+ *         description: Offset for pagination (default 0)
+ *         example: 0
+ *       - in: query
+ *         name: pharmacyId
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Filter activities by specific pharmacy ID
+ *         example: "3e19f01d-511d-421f-9cc6-ed83d33e034d"
+ *     responses:
+ *       200:
+ *         description: Recent activity data retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     activities:
+ *                       type: array
+ *                       description: List of recent activity records
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             format: uuid
+ *                             example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *                           activityType:
+ *                             type: string
+ *                             enum: [document_uploaded, product_added]
+ *                             example: document_uploaded
+ *                           entityId:
+ *                             type: string
+ *                             format: uuid
+ *                             description: ID of the document or product
+ *                             example: "d1e2f3a4-b5c6-7890-defg-hi1234567890"
+ *                           entityName:
+ *                             type: string
+ *                             description: Name of the document file or product
+ *                             example: "returns_report_2025.pdf"
+ *                           metadata:
+ *                             type: object
+ *                             description: Additional details about the activity
+ *                             example: {"file_size": 1024000, "file_type": "application/pdf", "source": "manual_upload"}
+ *                           createdAt:
+ *                             type: string
+ *                             format: date-time
+ *                             example: "2025-12-31T10:30:00.000Z"
+ *                           pharmacy:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: string
+ *                                 format: uuid
+ *                                 example: "3e19f01d-511d-421f-9cc6-ed83d33e034d"
+ *                               name:
+ *                                 type: string
+ *                                 example: "John Doe"
+ *                               pharmacyName:
+ *                                 type: string
+ *                                 example: "HealthPlus Pharmacy"
+ *                               email:
+ *                                 type: string
+ *                                 format: email
+ *                                 example: "pharmacy@example.com"
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         total:
+ *                           type: integer
+ *                           description: Total number of matching activities
+ *                           example: 150
+ *                         limit:
+ *                           type: integer
+ *                           example: 20
+ *                         offset:
+ *                           type: integer
+ *                           example: 0
+ *                         hasMore:
+ *                           type: boolean
+ *                           description: Whether there are more records to fetch
+ *                           example: true
+ *                     stats:
+ *                       type: object
+ *                       properties:
+ *                         todayCount:
+ *                           type: integer
+ *                           description: Number of activities today
+ *                           example: 12
+ *                         thisWeekCount:
+ *                           type: integer
+ *                           description: Number of activities this week
+ *                           example: 45
+ *                         totalCount:
+ *                           type: integer
+ *                           description: Total number of activities
+ *                           example: 150
+ *                     filters:
+ *                       type: object
+ *                       properties:
+ *                         activityType:
+ *                           type: string
+ *                           nullable: true
+ *                           description: Activity type filter applied
+ *                         pharmacyId:
+ *                           type: string
+ *                           format: uuid
+ *                           nullable: true
+ *                           description: Pharmacy ID filter applied
+ *                     generatedAt:
+ *                       type: string
+ *                       format: date-time
+ *                       example: "2025-12-31T10:30:00.000Z"
+ *       400:
+ *         description: Invalid activity type provided
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: error
+ *                 message:
+ *                   type: string
+ *                   example: Invalid activity type. Must be "document_uploaded" or "product_added"
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get('/', getAdminRecentActivityHandler);
+
+export default router;
+
