@@ -104,24 +104,48 @@ export const getMarketplaceDealByIdHandler = catchAsync(
 // ============================================================
 export const createMarketplaceDealHandler = catchAsync(
   async (req: AdminRequest, res: Response, _next: NextFunction) => {
-    const {
-      productName,
-      category,
-      quantity,
-      unit,
-      originalPrice,
-      dealPrice,
-      distributorName,
-      expiryDate,
-      ndc,
-      distributorId,
-      notes,
-    } = req.body;
+    // Handle both field name variations (distributor vs distributorName)
+    const distributorName = req.body.distributorName || req.body.distributor;
+    
+    // Parse form data - multipart/form-data sends everything as strings
+    const productName = req.body.productName;
+    const category = req.body.category;
+    const quantity = req.body.quantity ? parseInt(req.body.quantity, 10) : undefined;
+    const unit = req.body.unit;
+    const originalPrice = req.body.originalPrice ? parseFloat(req.body.originalPrice) : undefined;
+    const dealPrice = req.body.dealPrice ? parseFloat(req.body.dealPrice) : undefined;
+    const expiryDate = req.body.expiryDate;
+    const ndc = req.body.ndc;
+    const distributorId = req.body.distributorId;
+    const notes = req.body.notes;
 
+    // Validate required fields
     if (!productName || !category || !quantity || !unit || !originalPrice || !dealPrice || !distributorName || !expiryDate) {
       throw new AppError(
         'Product name, category, quantity, unit, original price, deal price, distributor name, and expiry date are required',
         400
+      );
+    }
+
+    // Validate numeric values
+    if (isNaN(quantity) || quantity <= 0) {
+      throw new AppError('Quantity must be a valid positive number', 400);
+    }
+    if (isNaN(originalPrice) || originalPrice <= 0) {
+      throw new AppError('Original price must be a valid positive number', 400);
+    }
+    if (isNaN(dealPrice) || dealPrice <= 0) {
+      throw new AppError('Deal price must be a valid positive number', 400);
+    }
+
+    // Handle image upload if provided
+    let imageUrl: string | undefined;
+    if (req.file) {
+      const { uploadImageToStorage } = await import('../utils/uploadImageToStorage');
+      imageUrl = await uploadImageToStorage(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype
       );
     }
 
@@ -137,6 +161,7 @@ export const createMarketplaceDealHandler = catchAsync(
       ndc,
       distributorId,
       notes,
+      imageUrl,
       createdBy: req.adminId,
     });
 
@@ -156,22 +181,47 @@ export const createMarketplaceDealHandler = catchAsync(
 export const updateMarketplaceDealHandler = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
     const { id } = req.params;
-    const {
-      productName,
-      category,
-      quantity,
-      unit,
-      originalPrice,
-      dealPrice,
-      distributorName,
-      expiryDate,
-      ndc,
-      status,
-      notes,
-    } = req.body;
 
     if (!id) {
       throw new AppError('Deal ID is required', 400);
+    }
+
+    // Handle both field name variations (distributor vs distributorName)
+    const distributorName = req.body.distributorName || req.body.distributor;
+    
+    // Parse form data - multipart/form-data sends everything as strings
+    // Only parse if the value exists (for partial updates)
+    const productName = req.body.productName;
+    const category = req.body.category;
+    const quantity = req.body.quantity !== undefined ? parseInt(req.body.quantity, 10) : undefined;
+    const unit = req.body.unit;
+    const originalPrice = req.body.originalPrice !== undefined ? parseFloat(req.body.originalPrice) : undefined;
+    const dealPrice = req.body.dealPrice !== undefined ? parseFloat(req.body.dealPrice) : undefined;
+    const expiryDate = req.body.expiryDate;
+    const ndc = req.body.ndc;
+    const status = req.body.status;
+    const notes = req.body.notes;
+
+    // Validate numeric values if provided
+    if (quantity !== undefined && (isNaN(quantity) || quantity <= 0)) {
+      throw new AppError('Quantity must be a valid positive number', 400);
+    }
+    if (originalPrice !== undefined && (isNaN(originalPrice) || originalPrice <= 0)) {
+      throw new AppError('Original price must be a valid positive number', 400);
+    }
+    if (dealPrice !== undefined && (isNaN(dealPrice) || dealPrice <= 0)) {
+      throw new AppError('Deal price must be a valid positive number', 400);
+    }
+
+    // Handle image upload if provided
+    let imageUrl: string | undefined;
+    if (req.file) {
+      const { uploadImageToStorage } = await import('../utils/uploadImageToStorage');
+      imageUrl = await uploadImageToStorage(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype
+      );
     }
 
     const deal = await adminMarketplaceService.updateMarketplaceDeal(id, {
@@ -186,6 +236,7 @@ export const updateMarketplaceDealHandler = catchAsync(
       ndc,
       status,
       notes,
+      imageUrl,
     });
 
     res.status(200).json({

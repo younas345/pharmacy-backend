@@ -23,6 +23,7 @@ export interface MarketplaceDeal {
   postedDate: string;
   status: string;
   notes: string | null;
+  imageUrl: string | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -70,6 +71,7 @@ export interface CreateDealData {
   ndc?: string;
   distributorId?: string;
   notes?: string;
+  imageUrl?: string;
   createdBy?: string;
 }
 
@@ -85,6 +87,7 @@ export interface UpdateDealData {
   ndc?: string;
   status?: string;
   notes?: string;
+  imageUrl?: string;
 }
 
 // ============================================================
@@ -176,6 +179,7 @@ export const createMarketplaceDeal = async (
     p_ndc: dealData.ndc || null,
     p_distributor_id: dealData.distributorId || null,
     p_notes: dealData.notes || null,
+    p_image_url: dealData.imageUrl || null,
     p_created_by: dealData.createdBy || null,
   });
 
@@ -215,6 +219,7 @@ export const updateMarketplaceDeal = async (
     p_ndc: updateData.ndc || null,
     p_status: updateData.status || null,
     p_notes: updateData.notes || null,
+    p_image_url: updateData.imageUrl || null,
   });
 
   if (error) {
