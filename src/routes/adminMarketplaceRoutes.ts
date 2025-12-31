@@ -460,6 +460,95 @@ router.get('/stats', getMarketplaceStatsHandler);
  */
 router.get('/categories', getMarketplaceCategoriesHandler);
 
+// ============================================================
+// Deal of the Day Routes (MUST be before /:id routes)
+// ============================================================
+
+/**
+ * @swagger
+ * /api/admin/marketplace/deal-of-the-day:
+ *   get:
+ *     summary: Get Deal of the Day info
+ *     description: |
+ *       Returns information about the current Deal of the Day,
+ *       including whether it's manually set or automatically selected.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Deal of the Day info retrieved successfully
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/deal-of-the-day', getDealOfTheDayInfoHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/deal-of-the-day:
+ *   delete:
+ *     summary: Unset Deal of the Day
+ *     description: |
+ *       Removes the current Deal of the Day.
+ *       System will fall back to automatic selection.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Deal of the Day removed successfully
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.delete('/deal-of-the-day', unsetDealOfTheDayHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/deals/{id}/set-deal-of-the-day:
+ *   post:
+ *     summary: Set Deal of the Day
+ *     description: |
+ *       Sets a specific deal as the Deal of the Day.
+ *       Automatically unsets the previous Deal of the Day.
+ *       Only active deals with remaining quantity can be set.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Deal ID
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               expiresAt:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Optional expiration timestamp. If not set, stays until manually changed.
+ *                 example: "2024-12-31T23:59:59Z"
+ *     responses:
+ *       200:
+ *         description: Deal of the Day set successfully
+ *       400:
+ *         description: Bad request - deal not active or invalid
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/deals/:id/set-deal-of-the-day', setDealOfTheDayHandler);
+
 /**
  * @swagger
  * /api/admin/marketplace/{id}:
@@ -685,95 +774,6 @@ router.patch('/:id/sold', markDealAsSoldHandler);
  *         description: Internal server error
  */
 router.delete('/:id', deleteMarketplaceDealHandler);
-
-// ============================================================
-// Deal of the Day Routes
-// ============================================================
-
-/**
- * @swagger
- * /api/admin/marketplace/deals/{id}/set-deal-of-the-day:
- *   post:
- *     summary: Set Deal of the Day
- *     description: |
- *       Sets a specific deal as the Deal of the Day.
- *       Automatically unsets the previous Deal of the Day.
- *       Only active deals with remaining quantity can be set.
- *     tags: [Admin - Marketplace]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Deal ID
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               expiresAt:
- *                 type: string
- *                 format: date-time
- *                 description: Optional expiration timestamp. If not set, stays until manually changed.
- *                 example: "2024-12-31T23:59:59Z"
- *     responses:
- *       200:
- *         description: Deal of the Day set successfully
- *       400:
- *         description: Bad request - deal not active or invalid
- *       401:
- *         description: Unauthorized
- *       500:
- *         description: Internal server error
- */
-router.post('/deals/:id/set-deal-of-the-day', setDealOfTheDayHandler);
-
-/**
- * @swagger
- * /api/admin/marketplace/deal-of-the-day:
- *   delete:
- *     summary: Unset Deal of the Day
- *     description: |
- *       Removes the current Deal of the Day.
- *       System will fall back to automatic selection.
- *     tags: [Admin - Marketplace]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Deal of the Day removed successfully
- *       401:
- *         description: Unauthorized
- *       500:
- *         description: Internal server error
- */
-router.delete('/deal-of-the-day', unsetDealOfTheDayHandler);
-
-/**
- * @swagger
- * /api/admin/marketplace/deal-of-the-day:
- *   get:
- *     summary: Get Deal of the Day info
- *     description: |
- *       Returns information about the current Deal of the Day,
- *       including whether it's manually set or automatically selected.
- *     tags: [Admin - Marketplace]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Deal of the Day info retrieved successfully
- *       401:
- *         description: Unauthorized
- *       500:
- *         description: Internal server error
- */
-router.get('/deal-of-the-day', getDealOfTheDayInfoHandler);
 
 export default router;
 
