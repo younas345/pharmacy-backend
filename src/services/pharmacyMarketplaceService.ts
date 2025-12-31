@@ -194,9 +194,26 @@ export const getMarketplaceDealById = async (
 };
 
 /**
- * Get marketplace categories
- * Uses PostgreSQL RPC function
+ * Get Deal of the Day
  */
+export const getDealOfTheDay = async (): Promise<MarketplaceDeal | null> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('get_deal_of_the_day');
+
+  if (error) {
+    throw new AppError(`Failed to get Deal of the Day: ${error.message}`, 400);
+  }
+
+  if (data.error || !data.deal) {
+    return null;
+  }
+
+  return data.deal as MarketplaceDeal;
+};
+
 export const getMarketplaceCategories = async (
   pharmacyId: string
 ): Promise<CategoryOption[]> => {

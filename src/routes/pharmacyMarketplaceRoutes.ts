@@ -3,6 +3,7 @@ import {
   getMarketplaceDealsHandler,
   getMarketplaceDealByIdHandler,
   getMarketplaceCategoriesHandler,
+  getDealOfTheDayHandler,
   addToCartHandler,
   getCartHandler,
   updateCartItemHandler,
@@ -474,6 +475,45 @@ router.get('/', getMarketplaceDealsHandler);
  *         description: Internal server error
  */
 router.get('/categories', getMarketplaceCategoriesHandler);
+
+/**
+ * @swagger
+ * /api/marketplace/deal-of-the-day:
+ *   get:
+ *     summary: Get Deal of the Day
+ *     description: |
+ *       Returns the current Deal of the Day.
+ *       If admin has manually set a deal, returns that.
+ *       Otherwise, returns automatic selection based on best savings.
+ *     tags: [Pharmacy - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Deal of the Day retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deal:
+ *                       $ref: '#/components/schemas/PharmacyMarketplaceDeal'
+ *                       nullable: true
+ *                 message:
+ *                   type: string
+ *                   example: No Deal of the Day available
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/deal-of-the-day', getDealOfTheDayHandler);
 
 /**
  * @swagger

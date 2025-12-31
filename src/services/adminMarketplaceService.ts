@@ -313,3 +313,86 @@ export const markDealAsSold = async (dealId: string): Promise<void> => {
   }
 };
 
+/**
+ * Set Deal of the Day
+ */
+export const setDealOfTheDay = async (
+  dealId: string,
+  expiresAt?: string
+): Promise<{ message: string; dealId: string; productName: string; expiresAt?: string }> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const expiresAtTimestamp = expiresAt ? new Date(expiresAt).toISOString() : null;
+
+  const { data, error } = await supabaseAdmin.rpc('set_deal_of_the_day', {
+    p_deal_id: dealId,
+    p_expires_at: expiresAtTimestamp,
+  });
+
+  if (error) {
+    throw new AppError(`Failed to set Deal of the Day: ${error.message}`, 400);
+  }
+
+  if (data.error) {
+    throw new AppError(data.message, 400);
+  }
+
+  return {
+    message: data.message,
+    dealId: data.dealId,
+    productName: data.productName,
+    expiresAt: data.expiresAt || undefined,
+  };
+};
+
+/**
+ * Unset Deal of the Day
+ */
+export const unsetDealOfTheDay = async (): Promise<{ message: string; dealsUnset: number }> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('unset_deal_of_the_day');
+
+  if (error) {
+    throw new AppError(`Failed to unset Deal of the Day: ${error.message}`, 400);
+  }
+
+  if (data.error) {
+    throw new AppError(data.message, 400);
+  }
+
+  return {
+    message: data.message,
+    dealsUnset: data.dealsUnset,
+  };
+};
+
+/**
+ * Get current Deal of the Day info (for admin)
+ */
+export const getDealOfTheDayInfo = async (): Promise<{
+  deal: MarketplaceDeal | null;
+  manualDeal: any;
+  hasManualSelection: boolean;
+}> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('get_current_deal_of_the_day_info');
+
+  if (error) {
+    throw new AppError(`Failed to get Deal of the Day info: ${error.message}`, 400);
+  }
+
+  return {
+    deal: data.deal?.deal || null,
+    manualDeal: data.manualDeal || null,
+    hasManualSelection: data.hasManualSelection || false,
+  };
+};
+

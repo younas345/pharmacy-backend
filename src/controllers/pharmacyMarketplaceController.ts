@@ -117,6 +117,36 @@ export const getMarketplaceCategoriesHandler = async (
   }
 };
 
+/**
+ * Get Deal of the Day
+ * GET /api/marketplace/deal-of-the-day
+ */
+export const getDealOfTheDayHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const deal = await pharmacyMarketplaceService.getDealOfTheDay();
+
+    if (!deal) {
+      res.status(200).json({
+        status: 'success',
+        data: { deal: null },
+        message: 'No Deal of the Day available',
+      });
+      return;
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: { deal },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ============================================================
 // Cart Handlers
 // ============================================================

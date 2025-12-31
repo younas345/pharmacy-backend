@@ -289,3 +289,67 @@ export const deleteMarketplaceDealHandler = catchAsync(
   }
 );
 
+// ============================================================
+// Deal of the Day Handlers
+// ============================================================
+
+/**
+ * Set Deal of the Day
+ * POST /api/admin/marketplace/deals/:id/set-deal-of-the-day
+ */
+export const setDealOfTheDayHandler = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const { id } = req.params;
+    const { expiresAt } = req.body;
+
+    if (!id) {
+      throw new AppError('Deal ID is required', 400);
+    }
+
+    const result = await adminMarketplaceService.setDealOfTheDay(id, expiresAt);
+
+    res.status(200).json({
+      status: 'success',
+      message: result.message,
+      data: {
+        dealId: result.dealId,
+        productName: result.productName,
+        expiresAt: result.expiresAt,
+      },
+    });
+  }
+);
+
+/**
+ * Unset Deal of the Day
+ * DELETE /api/admin/marketplace/deal-of-the-day
+ */
+export const unsetDealOfTheDayHandler = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const result = await adminMarketplaceService.unsetDealOfTheDay();
+
+    res.status(200).json({
+      status: 'success',
+      message: result.message,
+      data: {
+        dealsUnset: result.dealsUnset,
+      },
+    });
+  }
+);
+
+/**
+ * Get Deal of the Day info
+ * GET /api/admin/marketplace/deal-of-the-day
+ */
+export const getDealOfTheDayInfoHandler = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const info = await adminMarketplaceService.getDealOfTheDayInfo();
+
+    res.status(200).json({
+      status: 'success',
+      data: info,
+    });
+  }
+);
+
