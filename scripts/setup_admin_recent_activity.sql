@@ -15,6 +15,7 @@
 -- PART 1: Create admin_recent_activity table
 -- ============================================================
 
+-- Create table if it doesn't exist
 CREATE TABLE IF NOT EXISTS public.admin_recent_activity (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   pharmacy_id uuid NOT NULL,
@@ -25,17 +26,24 @@ CREATE TABLE IF NOT EXISTS public.admin_recent_activity (
   created_at timestamp with time zone NULL DEFAULT now(),
   CONSTRAINT admin_recent_activity_pkey PRIMARY KEY (id),
   CONSTRAINT admin_recent_activity_pharmacy_id_fkey FOREIGN KEY (pharmacy_id) 
-    REFERENCES pharmacy (id) ON DELETE CASCADE,
-  CONSTRAINT admin_recent_activity_activity_type_check CHECK (
-    activity_type::text = ANY (
-      ARRAY[
-        'document_uploaded'::character varying,
-        'product_added'::character varying,
-        'pharmacy_registered'::character varying
-      ]::text[]
-    )
-  )
+    REFERENCES pharmacy (id) ON DELETE CASCADE
 ) TABLESPACE pg_default;
+
+-- Drop and recreate the constraint to ensure it includes all activity types
+-- This handles the case where the table was created with an older constraint
+ALTER TABLE public.admin_recent_activity 
+DROP CONSTRAINT IF EXISTS admin_recent_activity_activity_type_check;
+
+ALTER TABLE public.admin_recent_activity 
+ADD CONSTRAINT admin_recent_activity_activity_type_check CHECK (
+  activity_type::text = ANY (
+    ARRAY[
+      'document_uploaded'::character varying,
+      'product_added'::character varying,
+      'pharmacy_registered'::character varying
+    ]::text[]
+  )
+);
 
 -- Indexes for efficient querying
 CREATE INDEX IF NOT EXISTS idx_admin_recent_activity_pharmacy_id 
