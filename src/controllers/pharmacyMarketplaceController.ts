@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../utils/appError';
 import * as pharmacyMarketplaceService from '../services/pharmacyMarketplaceService';
+import * as marketplaceCheckoutService from '../services/marketplaceCheckoutService';
 
 // ============================================================
 // Marketplace Deals Handlers
@@ -339,6 +340,196 @@ export const validateCartHandler = async (
     res.status(200).json({
       status: 'success',
       data: validation,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================================
+// Checkout & Orders Handlers
+// ============================================================
+
+/**
+ * Create Stripe checkout session
+ * POST /api/marketplace/checkout
+ */
+export const createCheckoutSessionHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const pharmacyId = req.pharmacyId;
+
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 401);
+    }
+
+    const { email, pharmacyName } = req.body;
+
+    if (!email) {
+      throw new AppError('Email is required for checkout', 400);
+    }
+
+    const result = await marketplaceCheckoutService.createCheckoutSession(
+      pharmacyId,
+      email,
+      pharmacyName
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Checkout session created',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get order by ID
+ * GET /api/marketplace/orders/:orderId
+ */
+export const getOrderByIdHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const pharmacyId = req.pharmacyId;
+    const { orderId } = req.params;
+
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 401);
+    }
+
+    if (!orderId) {
+      throw new AppError('Order ID is required', 400);
+    }
+
+    const order = await marketplaceCheckoutService.getOrderById(
+      pharmacyId,
+      orderId
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: { order },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get order by Stripe session ID (for success page)
+ * GET /api/marketplace/orders/session/:sessionId
+ */
+export const getOrderBySessionIdHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const pharmacyId = req.pharmacyId;
+    const { sessionId } = req.params;
+
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 401);
+    }
+
+    if (!sessionId) {
+      throw new AppError('Session ID is required', 400);
+    }
+
+    const order = await marketplaceCheckoutService.getOrderBySessionId(
+      pharmacyId,
+      sessionId
+    );
+
+    if (!order) {
+      throw new AppError('Order not found', 404);
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: { order },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get pharmacy orders list
+ * GET /api/marketplace/orders
+ */
+export const getOrdersHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const pharmacyId = req.pharmacyId;
+
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 401);
+    }
+
+    const {
+      page = '1',
+      limit = '10',
+      status,
+    } = req.query;
+
+    const result = await marketplaceCheckoutService.getPharmacyOrders(
+      pharmacyId,
+      parseInt(page as string, 10),
+      parseInt(limit as string, 10),
+      status as string
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Cancel order
+ * POST /api/marketplace/orders/:orderId/cancel
+ */
+export const cancelOrderHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const pharmacyId = req.pharmacyId;
+    const { orderId } = req.params;
+
+    if (!pharmacyId) {
+      throw new AppError('Pharmacy ID is required', 401);
+    }
+
+    if (!orderId) {
+      throw new AppError('Order ID is required', 400);
+    }
+
+    const result = await marketplaceCheckoutService.cancelOrder(
+      pharmacyId,
+      orderId
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: result.message,
+      data: { orderNumber: result.orderNumber },
     });
   } catch (error) {
     next(error);

@@ -10,6 +10,11 @@ import {
   clearCartHandler,
   getCartCountHandler,
   validateCartHandler,
+  createCheckoutSessionHandler,
+  getOrderByIdHandler,
+  getOrderBySessionIdHandler,
+  getOrdersHandler,
+  cancelOrderHandler,
 } from '../controllers/pharmacyMarketplaceController';
 import { authenticate } from '../middleware/auth';
 
@@ -753,6 +758,404 @@ router.delete('/cart/:itemId', removeFromCartHandler);
  *         description: Internal server error
  */
 router.delete('/cart', clearCartHandler);
+
+// ============================================================
+// Checkout & Orders Routes
+// ============================================================
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     MarketplaceOrder:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *           format: uuid
+ *         orderNumber:
+ *           type: string
+ *           example: "ORD-000001"
+ *         status:
+ *           type: string
+ *           enum: [pending, processing, paid, confirmed, shipped, delivered, cancelled, refunded]
+ *         subtotal:
+ *           type: number
+ *           example: 150.00
+ *         taxAmount:
+ *           type: number
+ *           example: 12.00
+ *         taxRate:
+ *           type: number
+ *           example: 0.08
+ *         shippingAmount:
+ *           type: number
+ *           example: 0.00
+ *         discountAmount:
+ *           type: number
+ *           example: 0.00
+ *         totalAmount:
+ *           type: number
+ *           example: 162.00
+ *         totalSavings:
+ *           type: number
+ *           example: 50.00
+ *         paymentMethodType:
+ *           type: string
+ *           nullable: true
+ *           example: "card"
+ *         paymentMethodLast4:
+ *           type: string
+ *           nullable: true
+ *           example: "4242"
+ *         paymentMethodBrand:
+ *           type: string
+ *           nullable: true
+ *           example: "visa"
+ *         stripeReceiptUrl:
+ *           type: string
+ *           nullable: true
+ *         notes:
+ *           type: string
+ *           nullable: true
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         paidAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         shippedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         deliveredAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         items:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/MarketplaceOrderItem'
+ *
+ *     MarketplaceOrderItem:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *           format: uuid
+ *         dealId:
+ *           type: string
+ *           format: uuid
+ *         productName:
+ *           type: string
+ *         ndc:
+ *           type: string
+ *           nullable: true
+ *         category:
+ *           type: string
+ *           nullable: true
+ *         distributor:
+ *           type: string
+ *           nullable: true
+ *         quantity:
+ *           type: integer
+ *         unitPrice:
+ *           type: number
+ *         originalPrice:
+ *           type: number
+ *         lineTotal:
+ *           type: number
+ *         lineSavings:
+ *           type: number
+ *
+ *     CheckoutRequest:
+ *       type: object
+ *       required:
+ *         - email
+ *       properties:
+ *         email:
+ *           type: string
+ *           format: email
+ *           example: "pharmacy@example.com"
+ *         pharmacyName:
+ *           type: string
+ *           example: "Main Street Pharmacy"
+ *
+ *     CheckoutResponse:
+ *       type: object
+ *       properties:
+ *         sessionId:
+ *           type: string
+ *           description: Stripe Checkout session ID
+ *         url:
+ *           type: string
+ *           description: Stripe Checkout URL to redirect user to
+ *         orderId:
+ *           type: string
+ *           format: uuid
+ *           description: Created order ID
+ *         orderNumber:
+ *           type: string
+ *           description: Order number
+ */
+
+/**
+ * @swagger
+ * /api/marketplace/checkout:
+ *   post:
+ *     summary: Create Stripe checkout session
+ *     description: |
+ *       Creates a Stripe Checkout session for the current cart.
+ *       Returns a URL to redirect the user to Stripe's hosted checkout page.
+ *       Also creates a pending order in the database.
+ *     tags: [Pharmacy - Marketplace Checkout]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CheckoutRequest'
+ *     responses:
+ *       200:
+ *         description: Checkout session created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Checkout session created
+ *                 data:
+ *                   $ref: '#/components/schemas/CheckoutResponse'
+ *       400:
+ *         description: Bad request - cart is empty or validation failed
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/checkout', createCheckoutSessionHandler);
+
+/**
+ * @swagger
+ * /api/marketplace/orders:
+ *   get:
+ *     summary: Get pharmacy orders list
+ *     description: Returns a paginated list of the pharmacy's marketplace orders.
+ *     tags: [Pharmacy - Marketplace Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [all, pending, processing, paid, confirmed, shipped, delivered, cancelled, refunded]
+ *         description: Filter by order status
+ *     responses:
+ *       200:
+ *         description: Orders retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     orders:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             format: uuid
+ *                           orderNumber:
+ *                             type: string
+ *                           status:
+ *                             type: string
+ *                           totalAmount:
+ *                             type: number
+ *                           totalSavings:
+ *                             type: number
+ *                           itemCount:
+ *                             type: integer
+ *                           createdAt:
+ *                             type: string
+ *                             format: date-time
+ *                           paidAt:
+ *                             type: string
+ *                             format: date-time
+ *                             nullable: true
+ *                     pagination:
+ *                       $ref: '#/components/schemas/PaginationInfo'
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/orders', getOrdersHandler);
+
+/**
+ * @swagger
+ * /api/marketplace/orders/session/{sessionId}:
+ *   get:
+ *     summary: Get order by Stripe session ID
+ *     description: |
+ *       Retrieves order details using the Stripe Checkout session ID.
+ *       Used on the success page after payment.
+ *     tags: [Pharmacy - Marketplace Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Stripe Checkout session ID
+ *     responses:
+ *       200:
+ *         description: Order retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     order:
+ *                       $ref: '#/components/schemas/MarketplaceOrder'
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/orders/session/:sessionId', getOrderBySessionIdHandler);
+
+/**
+ * @swagger
+ * /api/marketplace/orders/{orderId}:
+ *   get:
+ *     summary: Get order by ID
+ *     description: Returns detailed order information including all items.
+ *     tags: [Pharmacy - Marketplace Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Order ID
+ *     responses:
+ *       200:
+ *         description: Order retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     order:
+ *                       $ref: '#/components/schemas/MarketplaceOrder'
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/orders/:orderId', getOrderByIdHandler);
+
+/**
+ * @swagger
+ * /api/marketplace/orders/{orderId}/cancel:
+ *   post:
+ *     summary: Cancel order
+ *     description: |
+ *       Cancels a pending or processing order.
+ *       Orders that have already been paid cannot be cancelled through this endpoint.
+ *     tags: [Pharmacy - Marketplace Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Order ID
+ *     responses:
+ *       200:
+ *         description: Order cancelled successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Order cancelled successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     orderNumber:
+ *                       type: string
+ *       400:
+ *         description: Bad request - order cannot be cancelled
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/orders/:orderId/cancel', cancelOrderHandler);
+
+// ============================================================
+// MUST BE LAST - Parameter route for deal by ID
+// ============================================================
 
 /**
  * @swagger
