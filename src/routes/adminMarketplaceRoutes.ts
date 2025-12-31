@@ -645,7 +645,17 @@ router.post('/', uploadImage.single('image'), createMarketplaceDealHandler);
  * /api/admin/marketplace/{id}:
  *   patch:
  *     summary: Update marketplace deal
- *     description: Updates an existing deal. Only provided fields will be updated.
+ *     description: |
+ *       Updates an existing deal. Only provided fields will be updated.
+ *       
+ *       **Image Upload:**
+ *       - Send as `multipart/form-data`
+ *       - Use field name `image` for the file
+ *       - Supported formats: JPG, PNG, GIF, WebP
+ *       - Max file size: 5MB
+ *       
+ *       **Alternative:**
+ *       - Send as `application/json` with `imageUrl` field (if you already have the image URL)
  *     tags: [Admin - Marketplace]
  *     security:
  *       - bearerAuth: []
@@ -660,6 +670,57 @@ router.post('/', uploadImage.single('image'), createMarketplaceDealHandler);
  *     requestBody:
  *       required: true
  *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               productName:
+ *                 type: string
+ *                 description: Product name
+ *               category:
+ *                 type: string
+ *                 description: Product category
+ *               quantity:
+ *                 type: integer
+ *                 minimum: 1
+ *                 description: Available quantity
+ *               minimumBuyQuantity:
+ *                 type: integer
+ *                 minimum: 1
+ *                 description: Minimum quantity pharmacy must buy
+ *               unit:
+ *                 type: string
+ *                 enum: [bottles, boxes, units, packs]
+ *                 description: Unit type
+ *               originalPrice:
+ *                 type: number
+ *                 format: float
+ *                 description: Original price per unit
+ *               dealPrice:
+ *                 type: number
+ *                 format: float
+ *                 description: Deal price per unit
+ *               distributorName:
+ *                 type: string
+ *                 description: Distributor name
+ *               expiryDate:
+ *                 type: string
+ *                 format: date
+ *                 description: Product expiry date
+ *               ndc:
+ *                 type: string
+ *                 description: NDC code
+ *               status:
+ *                 type: string
+ *                 enum: [active, sold, expired]
+ *                 description: Deal status
+ *               notes:
+ *                 type: string
+ *                 description: Additional notes
+ *               image:
+ *                 type: string
+ *                 format: binary
+ *                 description: Product image file (JPG, PNG, GIF, WebP - max 5MB)
  *         application/json:
  *           schema:
  *             $ref: '#/components/schemas/UpdateDealRequest'
