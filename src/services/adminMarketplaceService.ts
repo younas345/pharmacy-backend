@@ -23,6 +23,7 @@ export interface MarketplaceDeal {
   postedDate: string;
   status: string;
   notes: string | null;
+  imageUrl: string | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -70,7 +71,9 @@ export interface CreateDealData {
   ndc?: string;
   distributorId?: string;
   notes?: string;
+  imageUrl?: string;
   createdBy?: string;
+  minimumBuyQuantity?: number;
 }
 
 export interface UpdateDealData {
@@ -85,6 +88,8 @@ export interface UpdateDealData {
   ndc?: string;
   status?: string;
   notes?: string;
+  imageUrl?: string;
+  minimumBuyQuantity?: number;
 }
 
 // ============================================================
@@ -176,7 +181,9 @@ export const createMarketplaceDeal = async (
     p_ndc: dealData.ndc || null,
     p_distributor_id: dealData.distributorId || null,
     p_notes: dealData.notes || null,
+    p_image_url: dealData.imageUrl || null,
     p_created_by: dealData.createdBy || null,
+    p_minimum_buy_quantity: dealData.minimumBuyQuantity || 1,
   });
 
   if (error) {
@@ -215,6 +222,8 @@ export const updateMarketplaceDeal = async (
     p_ndc: updateData.ndc || null,
     p_status: updateData.status || null,
     p_notes: updateData.notes || null,
+    p_image_url: updateData.imageUrl || null,
+    p_minimum_buy_quantity: updateData.minimumBuyQuantity ?? null,
   });
 
   if (error) {
@@ -306,5 +315,88 @@ export const markDealAsSold = async (dealId: string): Promise<void> => {
   if (data.error) {
     throw new AppError(data.message, 400);
   }
+};
+
+/**
+ * Set Deal of the Day
+ */
+export const setDealOfTheDay = async (
+  dealId: string,
+  expiresAt?: string
+): Promise<{ message: string; dealId: string; productName: string; expiresAt?: string }> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const expiresAtTimestamp = expiresAt ? new Date(expiresAt).toISOString() : null;
+
+  const { data, error } = await supabaseAdmin.rpc('set_deal_of_the_day', {
+    p_deal_id: dealId,
+    p_expires_at: expiresAtTimestamp,
+  });
+
+  if (error) {
+    throw new AppError(`Failed to set Deal of the Day: ${error.message}`, 400);
+  }
+
+  if (data.error) {
+    throw new AppError(data.message, 400);
+  }
+
+  return {
+    message: data.message,
+    dealId: data.dealId,
+    productName: data.productName,
+    expiresAt: data.expiresAt || undefined,
+  };
+};
+
+/**
+ * Unset Deal of the Day
+ */
+export const unsetDealOfTheDay = async (): Promise<{ message: string; dealsUnset: number }> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('unset_deal_of_the_day');
+
+  if (error) {
+    throw new AppError(`Failed to unset Deal of the Day: ${error.message}`, 400);
+  }
+
+  if (data.error) {
+    throw new AppError(data.message, 400);
+  }
+
+  return {
+    message: data.message,
+    dealsUnset: data.dealsUnset,
+  };
+};
+
+/**
+ * Get current Deal of the Day info (for admin)
+ */
+export const getDealOfTheDayInfo = async (): Promise<{
+  deal: MarketplaceDeal | null;
+  manualDeal: any;
+  hasManualSelection: boolean;
+}> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('get_current_deal_of_the_day_info');
+
+  if (error) {
+    throw new AppError(`Failed to get Deal of the Day info: ${error.message}`, 400);
+  }
+
+  return {
+    deal: data.deal?.deal || null,
+    manualDeal: data.manualDeal || null,
+    hasManualSelection: data.hasManualSelection || false,
+  };
 };
 

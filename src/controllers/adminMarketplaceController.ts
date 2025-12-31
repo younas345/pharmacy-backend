@@ -104,24 +104,48 @@ export const getMarketplaceDealByIdHandler = catchAsync(
 // ============================================================
 export const createMarketplaceDealHandler = catchAsync(
   async (req: AdminRequest, res: Response, _next: NextFunction) => {
-    const {
-      productName,
-      category,
-      quantity,
-      unit,
-      originalPrice,
-      dealPrice,
-      distributorName,
-      expiryDate,
-      ndc,
-      distributorId,
-      notes,
-    } = req.body;
+    // Handle both field name variations (distributor vs distributorName)
+    const distributorName = req.body.distributorName || req.body.distributor;
+    
+    // Parse form data - multipart/form-data sends everything as strings
+    const productName = req.body.productName;
+    const category = req.body.category;
+    const quantity = req.body.quantity ? parseInt(req.body.quantity, 10) : undefined;
+    const unit = req.body.unit;
+    const originalPrice = req.body.originalPrice ? parseFloat(req.body.originalPrice) : undefined;
+    const dealPrice = req.body.dealPrice ? parseFloat(req.body.dealPrice) : undefined;
+    const expiryDate = req.body.expiryDate;
+    const ndc = req.body.ndc;
+    const distributorId = req.body.distributorId;
+    const notes = req.body.notes;
 
+    // Validate required fields
     if (!productName || !category || !quantity || !unit || !originalPrice || !dealPrice || !distributorName || !expiryDate) {
       throw new AppError(
         'Product name, category, quantity, unit, original price, deal price, distributor name, and expiry date are required',
         400
+      );
+    }
+
+    // Validate numeric values
+    if (isNaN(quantity) || quantity <= 0) {
+      throw new AppError('Quantity must be a valid positive number', 400);
+    }
+    if (isNaN(originalPrice) || originalPrice <= 0) {
+      throw new AppError('Original price must be a valid positive number', 400);
+    }
+    if (isNaN(dealPrice) || dealPrice <= 0) {
+      throw new AppError('Deal price must be a valid positive number', 400);
+    }
+
+    // Handle image upload if provided
+    let imageUrl: string | undefined;
+    if (req.file) {
+      const { uploadImageToStorage } = await import('../utils/uploadImageToStorage');
+      imageUrl = await uploadImageToStorage(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype
       );
     }
 
@@ -137,6 +161,7 @@ export const createMarketplaceDealHandler = catchAsync(
       ndc,
       distributorId,
       notes,
+      imageUrl,
       createdBy: req.adminId,
     });
 
@@ -156,28 +181,58 @@ export const createMarketplaceDealHandler = catchAsync(
 export const updateMarketplaceDealHandler = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
     const { id } = req.params;
-    const {
-      productName,
-      category,
-      quantity,
-      unit,
-      originalPrice,
-      dealPrice,
-      distributorName,
-      expiryDate,
-      ndc,
-      status,
-      notes,
-    } = req.body;
 
     if (!id) {
       throw new AppError('Deal ID is required', 400);
+    }
+
+    // Handle both field name variations (distributor vs distributorName)
+    const distributorName = req.body.distributorName || req.body.distributor;
+    
+    // Parse form data - multipart/form-data sends everything as strings
+    // Only parse if the value exists (for partial updates)
+    const productName = req.body.productName;
+    const category = req.body.category;
+    const quantity = req.body.quantity !== undefined ? parseInt(req.body.quantity, 10) : undefined;
+    const minimumBuyQuantity = req.body.minimumBuyQuantity !== undefined ? parseInt(req.body.minimumBuyQuantity, 10) : undefined;
+    const unit = req.body.unit;
+    const originalPrice = req.body.originalPrice !== undefined ? parseFloat(req.body.originalPrice) : undefined;
+    const dealPrice = req.body.dealPrice !== undefined ? parseFloat(req.body.dealPrice) : undefined;
+    const expiryDate = req.body.expiryDate;
+    const ndc = req.body.ndc;
+    const status = req.body.status;
+    const notes = req.body.notes;
+
+    // Validate numeric values if provided
+    if (quantity !== undefined && (isNaN(quantity) || quantity <= 0)) {
+      throw new AppError('Quantity must be a valid positive number', 400);
+    }
+    if (minimumBuyQuantity !== undefined && (isNaN(minimumBuyQuantity) || minimumBuyQuantity < 1)) {
+      throw new AppError('Minimum buy quantity must be at least 1', 400);
+    }
+    if (originalPrice !== undefined && (isNaN(originalPrice) || originalPrice <= 0)) {
+      throw new AppError('Original price must be a valid positive number', 400);
+    }
+    if (dealPrice !== undefined && (isNaN(dealPrice) || dealPrice <= 0)) {
+      throw new AppError('Deal price must be a valid positive number', 400);
+    }
+
+    // Handle image upload if provided
+    let imageUrl: string | undefined;
+    if (req.file) {
+      const { uploadImageToStorage } = await import('../utils/uploadImageToStorage');
+      imageUrl = await uploadImageToStorage(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype
+      );
     }
 
     const deal = await adminMarketplaceService.updateMarketplaceDeal(id, {
       productName,
       category,
       quantity,
+      minimumBuyQuantity,
       unit,
       originalPrice,
       dealPrice,
@@ -186,6 +241,7 @@ export const updateMarketplaceDealHandler = catchAsync(
       ndc,
       status,
       notes,
+      imageUrl,
     });
 
     res.status(200).json({
@@ -234,6 +290,70 @@ export const deleteMarketplaceDealHandler = catchAsync(
     res.status(200).json({
       status: 'success',
       message: 'Deal deleted successfully',
+    });
+  }
+);
+
+// ============================================================
+// Deal of the Day Handlers
+// ============================================================
+
+/**
+ * Set Deal of the Day
+ * POST /api/admin/marketplace/deals/:id/set-deal-of-the-day
+ */
+export const setDealOfTheDayHandler = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const { id } = req.params;
+    const { expiresAt } = req.body;
+
+    if (!id) {
+      throw new AppError('Deal ID is required', 400);
+    }
+
+    const result = await adminMarketplaceService.setDealOfTheDay(id, expiresAt);
+
+    res.status(200).json({
+      status: 'success',
+      message: result.message,
+      data: {
+        dealId: result.dealId,
+        productName: result.productName,
+        expiresAt: result.expiresAt,
+      },
+    });
+  }
+);
+
+/**
+ * Unset Deal of the Day
+ * DELETE /api/admin/marketplace/deal-of-the-day
+ */
+export const unsetDealOfTheDayHandler = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const result = await adminMarketplaceService.unsetDealOfTheDay();
+
+    res.status(200).json({
+      status: 'success',
+      message: result.message,
+      data: {
+        dealsUnset: result.dealsUnset,
+      },
+    });
+  }
+);
+
+/**
+ * Get Deal of the Day info
+ * GET /api/admin/marketplace/deal-of-the-day
+ */
+export const getDealOfTheDayInfoHandler = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const info = await adminMarketplaceService.getDealOfTheDayInfo();
+
+    res.status(200).json({
+      status: 'success',
+      data: info,
     });
   }
 );

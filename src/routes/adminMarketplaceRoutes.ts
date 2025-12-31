@@ -8,8 +8,12 @@ import {
   updateMarketplaceDealHandler,
   markDealAsSoldHandler,
   deleteMarketplaceDealHandler,
+  setDealOfTheDayHandler,
+  unsetDealOfTheDayHandler,
+  getDealOfTheDayInfoHandler,
 } from '../controllers/adminMarketplaceController';
 import { authenticateAdmin } from '../middleware/adminAuth';
+import { uploadImage } from '../middleware/uploadImage';
 
 const router = Router();
 
@@ -52,6 +56,10 @@ router.use(authenticateAdmin);
  *           type: integer
  *           description: Available quantity
  *           example: 500
+ *         minimumBuyQuantity:
+ *           type: integer
+ *           description: Minimum quantity pharmacy must buy
+ *           example: 5
  *         unit:
  *           type: string
  *           enum: [bottles, boxes, units, packs]
@@ -224,6 +232,11 @@ router.use(authenticateAdmin);
  *         notes:
  *           type: string
  *           description: Additional notes
+ *         minimumBuyQuantity:
+ *           type: integer
+ *           minimum: 1
+ *           description: Minimum quantity pharmacy must buy (default 1)
+ *           example: 5
  *     
  *     UpdateDealRequest:
  *       type: object
@@ -267,6 +280,10 @@ router.use(authenticateAdmin);
  *         notes:
  *           type: string
  *           description: Additional notes
+ *         minimumBuyQuantity:
+ *           type: integer
+ *           minimum: 1
+ *           description: Minimum quantity pharmacy must buy
  *     
  *     MarketplaceListResponse:
  *       type: object
@@ -443,6 +460,95 @@ router.get('/stats', getMarketplaceStatsHandler);
  */
 router.get('/categories', getMarketplaceCategoriesHandler);
 
+// ============================================================
+// Deal of the Day Routes (MUST be before /:id routes)
+// ============================================================
+
+/**
+ * @swagger
+ * /api/admin/marketplace/deal-of-the-day:
+ *   get:
+ *     summary: Get Deal of the Day info
+ *     description: |
+ *       Returns information about the current Deal of the Day,
+ *       including whether it's manually set or automatically selected.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Deal of the Day info retrieved successfully
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/deal-of-the-day', getDealOfTheDayInfoHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/deal-of-the-day:
+ *   delete:
+ *     summary: Unset Deal of the Day
+ *     description: |
+ *       Removes the current Deal of the Day.
+ *       System will fall back to automatic selection.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Deal of the Day removed successfully
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.delete('/deal-of-the-day', unsetDealOfTheDayHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/deals/{id}/set-deal-of-the-day:
+ *   post:
+ *     summary: Set Deal of the Day
+ *     description: |
+ *       Sets a specific deal as the Deal of the Day.
+ *       Automatically unsets the previous Deal of the Day.
+ *       Only active deals with remaining quantity can be set.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Deal ID
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               expiresAt:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Optional expiration timestamp. If not set, stays until manually changed.
+ *                 example: "2024-12-31T23:59:59Z"
+ *     responses:
+ *       200:
+ *         description: Deal of the Day set successfully
+ *       400:
+ *         description: Bad request - deal not active or invalid
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/deals/:id/set-deal-of-the-day', setDealOfTheDayHandler);
+
 /**
  * @swagger
  * /api/admin/marketplace/{id}:
@@ -532,14 +638,24 @@ router.get('/:id', getMarketplaceDealByIdHandler);
  *       500:
  *         description: Internal server error
  */
-router.post('/', createMarketplaceDealHandler);
+router.post('/', uploadImage.single('image'), createMarketplaceDealHandler);
 
 /**
  * @swagger
  * /api/admin/marketplace/{id}:
  *   patch:
  *     summary: Update marketplace deal
- *     description: Updates an existing deal. Only provided fields will be updated.
+ *     description: |
+ *       Updates an existing deal. Only provided fields will be updated.
+ *       
+ *       **Image Upload:**
+ *       - Send as `multipart/form-data`
+ *       - Use field name `image` for the file
+ *       - Supported formats: JPG, PNG, GIF, WebP
+ *       - Max file size: 5MB
+ *       
+ *       **Alternative:**
+ *       - Send as `application/json` with `imageUrl` field (if you already have the image URL)
  *     tags: [Admin - Marketplace]
  *     security:
  *       - bearerAuth: []
@@ -554,6 +670,57 @@ router.post('/', createMarketplaceDealHandler);
  *     requestBody:
  *       required: true
  *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               productName:
+ *                 type: string
+ *                 description: Product name
+ *               category:
+ *                 type: string
+ *                 description: Product category
+ *               quantity:
+ *                 type: integer
+ *                 minimum: 1
+ *                 description: Available quantity
+ *               minimumBuyQuantity:
+ *                 type: integer
+ *                 minimum: 1
+ *                 description: Minimum quantity pharmacy must buy
+ *               unit:
+ *                 type: string
+ *                 enum: [bottles, boxes, units, packs]
+ *                 description: Unit type
+ *               originalPrice:
+ *                 type: number
+ *                 format: float
+ *                 description: Original price per unit
+ *               dealPrice:
+ *                 type: number
+ *                 format: float
+ *                 description: Deal price per unit
+ *               distributorName:
+ *                 type: string
+ *                 description: Distributor name
+ *               expiryDate:
+ *                 type: string
+ *                 format: date
+ *                 description: Product expiry date
+ *               ndc:
+ *                 type: string
+ *                 description: NDC code
+ *               status:
+ *                 type: string
+ *                 enum: [active, sold, expired]
+ *                 description: Deal status
+ *               notes:
+ *                 type: string
+ *                 description: Additional notes
+ *               image:
+ *                 type: string
+ *                 format: binary
+ *                 description: Product image file (JPG, PNG, GIF, WebP - max 5MB)
  *         application/json:
  *           schema:
  *             $ref: '#/components/schemas/UpdateDealRequest'
@@ -585,7 +752,7 @@ router.post('/', createMarketplaceDealHandler);
  *       500:
  *         description: Internal server error
  */
-router.patch('/:id', updateMarketplaceDealHandler);
+router.patch('/:id', uploadImage.single('image'), updateMarketplaceDealHandler);
 
 /**
  * @swagger

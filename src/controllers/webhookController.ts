@@ -1,16 +1,19 @@
 import { Request, Response, NextFunction } from 'express';
 import { catchAsync } from '../utils/catchAsync';
 import { updateSubscriptionFromStripe } from '../services/subscriptionService';
+import { handlePaymentSuccess } from '../services/marketplaceCheckoutService';
 import { AppError } from '../utils/appError';
 import Stripe from 'stripe';
 
 if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error('STRIPE_SECRET_KEY is not set in environment variables');
+  console.warn('STRIPE_SECRET_KEY is not set in environment variables');
 }
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2025-11-17.clover',
-});
+const stripe = process.env.STRIPE_SECRET_KEY 
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: '2025-11-17.clover',
+    })
+  : null;
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
@@ -34,6 +37,10 @@ export const handleWebhook = catchAsync(async (req: Request, res: Response, next
 
   if (!sig) {
     return next(new AppError('Missing stripe-signature header', 400));
+  }
+
+  if (!stripe) {
+    return next(new AppError('Stripe is not configured', 500));
   }
 
   if (!webhookSecret) {
@@ -69,12 +76,81 @@ async function processWebhookEvent(event: Stripe.Event): Promise<void> {
     case 'checkout.session.completed': {
       const session = event.data.object as Stripe.Checkout.Session;
       
-      if (session.mode === 'subscription' && session.subscription) {
+      // Handle subscription checkout
+      if (session.mode === 'subscription' && session.subscription && stripe) {
         const subscription = await stripe.subscriptions.retrieve(
           session.subscription as string,
           { expand: ['default_payment_method'] }
         );
         await updateSubscriptionFromStripe(subscription);
+      }
+      
+      // Handle marketplace one-time payment checkout
+      if (session.mode === 'payment' && session.metadata?.type === 'marketplace_order') {
+        console.log('Processing marketplace payment for session:', session.id);
+        
+        // Get payment intent details
+        let paymentMethodDetails: { type?: string; last4?: string; brand?: string } = {};
+        let receiptUrl: string | undefined;
+        
+        if (session.payment_intent && stripe) {
+          const paymentIntentId = typeof session.payment_intent === 'string' 
+            ? session.payment_intent 
+            : session.payment_intent.id;
+            
+          const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+            expand: ['payment_method', 'latest_charge'],
+          });
+          
+          // Get payment method details
+          if (paymentIntent.payment_method && typeof paymentIntent.payment_method !== 'string') {
+            const pm = paymentIntent.payment_method;
+            if (pm.type === 'card' && pm.card) {
+              paymentMethodDetails = {
+                type: 'card',
+                last4: pm.card.last4,
+                brand: pm.card.brand,
+              };
+            }
+          }
+          
+          // Get receipt URL from charge
+          if (paymentIntent.latest_charge && typeof paymentIntent.latest_charge !== 'string') {
+            receiptUrl = paymentIntent.latest_charge.receipt_url || undefined;
+          }
+          
+          // Update marketplace order
+          await handlePaymentSuccess(
+            session.id,
+            paymentIntentId,
+            session.payment_status || 'paid',
+            paymentMethodDetails,
+            receiptUrl
+          );
+        }
+      }
+      break;
+    }
+
+    case 'payment_intent.succeeded': {
+      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      
+      // Check if this is a marketplace order payment
+      if (paymentIntent.metadata?.type === 'marketplace_order') {
+        console.log('Payment intent succeeded for marketplace order:', paymentIntent.id);
+        // The checkout.session.completed event handles the main update
+        // This is a backup in case the session event doesn't fire
+      }
+      break;
+    }
+
+    case 'payment_intent.payment_failed': {
+      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      
+      // Handle failed marketplace payment
+      if (paymentIntent.metadata?.type === 'marketplace_order') {
+        console.log('Payment failed for marketplace order:', paymentIntent.id);
+        // Could update order status to failed here if needed
       }
       break;
     }
@@ -96,7 +172,7 @@ async function processWebhookEvent(event: Stripe.Event): Promise<void> {
       const invoice = event.data.object as Stripe.Invoice;
       // Invoice has subscription property but TypeScript types may not include it
       const subscriptionId = (invoice as any).subscription as string | Stripe.Subscription | null;
-      if (subscriptionId) {
+      if (subscriptionId && stripe) {
         const subscription = typeof subscriptionId === 'string'
           ? await stripe.subscriptions.retrieve(subscriptionId)
           : subscriptionId;
@@ -109,7 +185,7 @@ async function processWebhookEvent(event: Stripe.Event): Promise<void> {
       const invoice = event.data.object as Stripe.Invoice;
       // Invoice has subscription property but TypeScript types may not include it
       const subscriptionId = (invoice as any).subscription as string | Stripe.Subscription | null;
-      if (subscriptionId) {
+      if (subscriptionId && stripe) {
         const subscription = typeof subscriptionId === 'string'
           ? await stripe.subscriptions.retrieve(subscriptionId)
           : subscriptionId;

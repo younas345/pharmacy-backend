@@ -10,8 +10,11 @@ const authAdmin = supabaseAdmin?.auth?.admin;
 
 // JWT configuration
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'your-secret-key-change-in-production';
-const JWT_EXPIRES_IN = '1h'; // 1 hour
-const JWT_EXPIRES_IN_SECONDS = 3600; // 1 hour in seconds
+// Admin tokens expire after 24 hours (configurable via env var)
+const JWT_EXPIRES_IN: string = process.env.ADMIN_JWT_EXPIRES_IN || '24h'; // Default 24 hours
+const JWT_EXPIRES_IN_SECONDS: number = process.env.ADMIN_JWT_EXPIRES_IN_SECONDS 
+  ? parseInt(process.env.ADMIN_JWT_EXPIRES_IN_SECONDS, 10)
+  : 86400; // 24 hours in seconds (24 * 60 * 60)
 
 export interface AdminLoginData {
   email: string;
@@ -87,7 +90,7 @@ export const adminLogin = async (data: AdminLoginData): Promise<AdminAuthRespons
 
   const token = jwt.sign(tokenPayload, JWT_SECRET, {
     expiresIn: JWT_EXPIRES_IN,
-  });
+  } as jwt.SignOptions);
 
   // Step 5: Update last_login_at
   await db
