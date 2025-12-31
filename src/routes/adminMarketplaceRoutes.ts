@@ -10,6 +10,7 @@ import {
   deleteMarketplaceDealHandler,
 } from '../controllers/adminMarketplaceController';
 import { authenticateAdmin } from '../middleware/adminAuth';
+import { uploadImage } from '../middleware/uploadImage';
 
 const router = Router();
 
@@ -532,7 +533,7 @@ router.get('/:id', getMarketplaceDealByIdHandler);
  *       500:
  *         description: Internal server error
  */
-router.post('/', createMarketplaceDealHandler);
+router.post('/', uploadImage.single('image'), createMarketplaceDealHandler);
 
 /**
  * @swagger
@@ -585,7 +586,7 @@ router.post('/', createMarketplaceDealHandler);
  *       500:
  *         description: Internal server error
  */
-router.patch('/:id', updateMarketplaceDealHandler);
+router.patch('/:id', uploadImage.single('image'), updateMarketplaceDealHandler);
 
 /**
  * @swagger
