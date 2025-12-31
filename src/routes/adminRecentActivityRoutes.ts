@@ -16,10 +16,12 @@ router.use(authenticateAdmin);
  *       Returns recent activity records for the admin dashboard including:
  *       - Document uploads by pharmacies
  *       - Product additions by pharmacies
+ *       - New pharmacy registrations
  *       
  *       Activities are recorded automatically via database triggers when:
  *       - A pharmacy uploads a new document
  *       - A pharmacy adds a new product to their list
+ *       - A new pharmacy registers
  *       
  *       Supports filtering by activity type and pharmacy ID.
  *       Supports pagination via limit and offset parameters.
@@ -31,7 +33,7 @@ router.use(authenticateAdmin);
  *         name: activityType
  *         schema:
  *           type: string
- *           enum: [document_uploaded, product_added]
+ *           enum: [document_uploaded, product_added, pharmacy_registered]
  *         description: Filter by activity type. If not provided, returns all types.
  *         example: document_uploaded
  *       - in: query
@@ -84,7 +86,7 @@ router.use(authenticateAdmin);
  *                             example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
  *                           activityType:
  *                             type: string
- *                             enum: [document_uploaded, product_added]
+ *                             enum: [document_uploaded, product_added, pharmacy_registered]
  *                             example: document_uploaded
  *                           entityId:
  *                             type: string
@@ -180,7 +182,7 @@ router.use(authenticateAdmin);
  *                   example: error
  *                 message:
  *                   type: string
- *                   example: Invalid activity type. Must be "document_uploaded" or "product_added"
+ *                   example: Invalid activity type. Must be "document_uploaded", "product_added", or "pharmacy_registered"
  *       401:
  *         description: Unauthorized - invalid or missing token
  *         content:

@@ -12,7 +12,7 @@ export interface ActivityPharmacy {
 // Interface for activity record
 export interface ActivityRecord {
   id: string;
-  activityType: 'document_uploaded' | 'product_added';
+  activityType: 'document_uploaded' | 'product_added' | 'pharmacy_registered';
   entityId: string;
   entityName: string | null;
   metadata: Record<string, unknown>;

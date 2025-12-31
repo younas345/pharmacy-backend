@@ -17,10 +17,10 @@ export const getAdminRecentActivityHandler = catchAsync(
     const activityType = req.query.activityType as string | undefined;
     
     // Validate activity type if provided
-    if (activityType && !['document_uploaded', 'product_added'].includes(activityType)) {
+    if (activityType && !['document_uploaded', 'product_added', 'pharmacy_registered'].includes(activityType)) {
       res.status(400).json({
         status: 'error',
-        message: 'Invalid activity type. Must be "document_uploaded" or "product_added"',
+        message: 'Invalid activity type. Must be "document_uploaded", "product_added", or "pharmacy_registered"',
       });
       return;
     }

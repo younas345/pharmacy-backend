@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS public.admin_recent_activity (
     activity_type::text = ANY (
       ARRAY[
         'document_uploaded'::character varying,
-        'product_added'::character varying
+        'product_added'::character varying,
+        'pharmacy_registered'::character varying
       ]::text[]
     )
   )
@@ -155,9 +156,50 @@ CREATE TRIGGER trg_record_product_add_activity
     FOR EACH ROW
     EXECUTE FUNCTION trigger_record_product_add_activity();
 
+-- Trigger function for pharmacy registration
+CREATE OR REPLACE FUNCTION trigger_record_pharmacy_registration_activity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    INSERT INTO public.admin_recent_activity (
+        pharmacy_id,
+        activity_type,
+        entity_id,
+        entity_name,
+        metadata
+    )
+    VALUES (
+        NEW.id,
+        'pharmacy_registered',
+        NEW.id,
+        NEW.pharmacy_name,
+        jsonb_build_object(
+            'name', NEW.name,
+            'email', NEW.email,
+            'phone', NEW.phone,
+            'npi_number', NEW.npi_number,
+            'dea_number', NEW.dea_number
+        )
+    );
+    
+    RETURN NEW;
+END;
+$$;
+
+-- Drop and create trigger for pharmacy registration
+DROP TRIGGER IF EXISTS trg_record_pharmacy_registration_activity ON public.pharmacy;
+
+CREATE TRIGGER trg_record_pharmacy_registration_activity
+    AFTER INSERT ON public.pharmacy
+    FOR EACH ROW
+    EXECUTE FUNCTION trigger_record_pharmacy_registration_activity();
+
 -- Grant execute permissions on trigger functions
 GRANT EXECUTE ON FUNCTION trigger_record_document_upload_activity() TO service_role;
 GRANT EXECUTE ON FUNCTION trigger_record_product_add_activity() TO service_role;
+GRANT EXECUTE ON FUNCTION trigger_record_pharmacy_registration_activity() TO service_role;
 
 
 -- ============================================================

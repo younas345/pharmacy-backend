@@ -3,6 +3,7 @@
 -- Automatically records activity when:
 -- 1. A pharmacy uploads a new document
 -- 2. A pharmacy adds a new product to their list
+-- 3. A new pharmacy registers
 -- ============================================================
 
 -- ============================================================
@@ -100,10 +101,57 @@ CREATE TRIGGER trg_record_product_add_activity
 
 
 -- ============================================================
+-- TRIGGER 3: Pharmacy Registration Activity
+-- Fires when a new row is inserted into pharmacy
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION trigger_record_pharmacy_registration_activity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    -- Insert activity record for pharmacy registration
+    INSERT INTO public.admin_recent_activity (
+        pharmacy_id,
+        activity_type,
+        entity_id,
+        entity_name,
+        metadata
+    )
+    VALUES (
+        NEW.id,
+        'pharmacy_registered',
+        NEW.id,
+        NEW.pharmacy_name,
+        jsonb_build_object(
+            'name', NEW.name,
+            'email', NEW.email,
+            'phone', NEW.phone,
+            'npi_number', NEW.npi_number,
+            'dea_number', NEW.dea_number
+        )
+    );
+    
+    RETURN NEW;
+END;
+$$;
+
+-- Drop existing trigger if exists and create new one
+DROP TRIGGER IF EXISTS trg_record_pharmacy_registration_activity ON public.pharmacy;
+
+CREATE TRIGGER trg_record_pharmacy_registration_activity
+    AFTER INSERT ON public.pharmacy
+    FOR EACH ROW
+    EXECUTE FUNCTION trigger_record_pharmacy_registration_activity();
+
+
+-- ============================================================
 -- Grant execute permissions on trigger functions
 -- ============================================================
 GRANT EXECUTE ON FUNCTION trigger_record_document_upload_activity() TO service_role;
 GRANT EXECUTE ON FUNCTION trigger_record_product_add_activity() TO service_role;
+GRANT EXECUTE ON FUNCTION trigger_record_pharmacy_registration_activity() TO service_role;
 
 -- ============================================================
 -- Notes:
@@ -114,5 +162,6 @@ GRANT EXECUTE ON FUNCTION trigger_record_product_add_activity() TO service_role;
 -- 4. pharmacy_id is derived from:
 --    - uploaded_documents: pharmacy_id column
 --    - product_list_items: added_by column (which is the auth.users id = pharmacy.id)
+--    - pharmacy: id column (the pharmacy's own ID)
 -- ============================================================
 

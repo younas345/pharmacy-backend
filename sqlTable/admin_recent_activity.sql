@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS public.admin_recent_activity (
     activity_type::text = ANY (
       ARRAY[
         'document_uploaded'::character varying,
-        'product_added'::character varying
+        'product_added'::character varying,
+        'pharmacy_registered'::character varying
       ]::text[]
     )
   )
@@ -43,7 +44,10 @@ CREATE INDEX IF NOT EXISTS idx_admin_recent_activity_entity_id
 -- Enable RLS
 ALTER TABLE public.admin_recent_activity ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies
+-- RLS Policies (drop if exist first to avoid conflicts)
+DROP POLICY IF EXISTS admin_recent_activity_select_policy ON public.admin_recent_activity;
+DROP POLICY IF EXISTS admin_recent_activity_insert_policy ON public.admin_recent_activity;
+
 -- Admin can read all activities
 CREATE POLICY admin_recent_activity_select_policy ON public.admin_recent_activity
   FOR SELECT

@@ -3,7 +3,7 @@
 -- Used by: GET /api/admin/recent-activity
 -- ============================================================
 -- Returns recent activity records for admin dashboard
--- Includes: document uploads and product additions
+-- Includes: document uploads, product additions, pharmacy registrations
 -- Supports filtering by activity type and pagination
 -- ============================================================
 
@@ -126,6 +126,9 @@ GRANT EXECUTE ON FUNCTION get_admin_recent_activity(TEXT, INTEGER, INTEGER, UUID
 --
 -- Get only product additions:
 -- SELECT get_admin_recent_activity('product_added');
+--
+-- Get only pharmacy registrations:
+-- SELECT get_admin_recent_activity('pharmacy_registered');
 --
 -- Get with pagination (page 2, 10 items per page):
 -- SELECT get_admin_recent_activity(NULL, 10, 10);
