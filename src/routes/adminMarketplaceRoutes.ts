@@ -56,6 +56,10 @@ router.use(authenticateAdmin);
  *           type: integer
  *           description: Available quantity
  *           example: 500
+ *         minimumBuyQuantity:
+ *           type: integer
+ *           description: Minimum quantity pharmacy must buy
+ *           example: 5
  *         unit:
  *           type: string
  *           enum: [bottles, boxes, units, packs]
@@ -228,6 +232,11 @@ router.use(authenticateAdmin);
  *         notes:
  *           type: string
  *           description: Additional notes
+ *         minimumBuyQuantity:
+ *           type: integer
+ *           minimum: 1
+ *           description: Minimum quantity pharmacy must buy (default 1)
+ *           example: 5
  *     
  *     UpdateDealRequest:
  *       type: object
@@ -271,6 +280,10 @@ router.use(authenticateAdmin);
  *         notes:
  *           type: string
  *           description: Additional notes
+ *         minimumBuyQuantity:
+ *           type: integer
+ *           minimum: 1
+ *           description: Minimum quantity pharmacy must buy
  *     
  *     MarketplaceListResponse:
  *       type: object

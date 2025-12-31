@@ -73,6 +73,7 @@ export interface CreateDealData {
   notes?: string;
   imageUrl?: string;
   createdBy?: string;
+  minimumBuyQuantity?: number;
 }
 
 export interface UpdateDealData {
@@ -88,6 +89,7 @@ export interface UpdateDealData {
   status?: string;
   notes?: string;
   imageUrl?: string;
+  minimumBuyQuantity?: number;
 }
 
 // ============================================================
@@ -181,6 +183,7 @@ export const createMarketplaceDeal = async (
     p_notes: dealData.notes || null,
     p_image_url: dealData.imageUrl || null,
     p_created_by: dealData.createdBy || null,
+    p_minimum_buy_quantity: dealData.minimumBuyQuantity || 1,
   });
 
   if (error) {
@@ -220,6 +223,7 @@ export const updateMarketplaceDeal = async (
     p_status: updateData.status || null,
     p_notes: updateData.notes || null,
     p_image_url: updateData.imageUrl || null,
+    p_minimum_buy_quantity: updateData.minimumBuyQuantity ?? null,
   });
 
   if (error) {
