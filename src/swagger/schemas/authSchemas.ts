@@ -57,6 +57,16 @@ export const authSchemas = {
           },
         },
       },
+      npiNumber: {
+        type: 'string',
+        example: '1234567890',
+        description: 'National Provider Identifier (NPI) number (optional)',
+      },
+      deaNumber: {
+        type: 'string',
+        example: 'AB1234567',
+        description: 'Drug Enforcement Administration (DEA) number (optional)',
+      },
     },
   },
   SigninRequest: {
