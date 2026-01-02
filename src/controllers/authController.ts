@@ -5,7 +5,7 @@ import { AppError } from '../utils/appError';
 
 export const signupHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { email, password, name, pharmacyName, phone } = req.body;
+    const { email, password, name, pharmacyName, phone, physicalAddress, npiNumber, deaNumber } = req.body;
 
     if (!email || !password || !name || !pharmacyName) {
       throw new AppError('Please provide email, password, name, and pharmacyName', 400);
@@ -17,6 +17,9 @@ export const signupHandler = catchAsync(
       name,
       pharmacyName,
       phone,
+      physicalAddress,
+      npiNumber,
+      deaNumber,
     });
 
     res.status(201).json({

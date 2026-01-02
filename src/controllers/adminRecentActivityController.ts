@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { getAdminRecentActivity } from '../services/adminRecentActivityService';
+import { getAdminRecentActivity, markAllActivitiesAsRead, markActivityAsRead } from '../services/adminRecentActivityService';
 import { catchAsync } from '../utils/catchAsync';
 
 /**
@@ -44,6 +44,36 @@ export const getAdminRecentActivityHandler = catchAsync(
     res.status(200).json({
       status: 'success',
       data: activityData,
+    });
+  }
+);
+
+/**
+ * Mark all admin activities as read
+ */
+export const markAllActivitiesAsReadHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const result = await markAllActivitiesAsRead();
+
+    res.status(200).json({
+      status: 'success',
+      data: result,
+    });
+  }
+);
+
+/**
+ * Mark a single admin activity as read
+ */
+export const markActivityAsReadHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { id } = req.params;
+
+    const result = await markActivityAsRead(id);
+
+    res.status(200).json({
+      status: 'success',
+      data: result,
     });
   }
 );
