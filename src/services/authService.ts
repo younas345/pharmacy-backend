@@ -10,12 +10,20 @@ const db = supabaseAdmin || supabase;
 const REFRESH_TOKEN_EXPIRY_DAYS = 30; // Custom refresh tokens last 30 days
 const ACCESS_TOKEN_EXPIRY_SECONDS = 3600; // Access tokens expire in 1 hour
 
+export interface PhysicalAddress {
+  street?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+}
+
 export interface SignupData {
   email: string;
   password: string;
   name: string;
   pharmacyName: string;
   phone?: string;
+  physicalAddress?: PhysicalAddress;
 }
 
 export interface SigninData {
@@ -228,7 +236,7 @@ const calculateExpiry = (): { expiresIn: number; expiresAt: number } => {
 };
 
 export const signup = async (data: SignupData): Promise<AuthResponse> => {
-  const { email, password, name, pharmacyName, phone } = data;
+  const { email, password, name, pharmacyName, phone, physicalAddress } = data;
 
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured. SUPABASE_SERVICE_ROLE_KEY is required.', 500);
@@ -263,6 +271,7 @@ export const signup = async (data: SignupData): Promise<AuthResponse> => {
         name,
         pharmacy_name: pharmacyName,
         phone: phone || null,
+        physical_address: physicalAddress || null,
         status: 'active', // Set to 'active' by default, or 'pending' if you want manual approval
       },
     ])

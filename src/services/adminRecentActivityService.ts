@@ -17,6 +17,8 @@ export interface ActivityRecord {
   entityName: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
+  isRead: boolean;
+  readAt: string | null;
   pharmacy: ActivityPharmacy;
 }
 
@@ -33,6 +35,7 @@ export interface ActivityStats {
   todayCount: number;
   thisWeekCount: number;
   totalCount: number;
+  unreadCount: number;
 }
 
 // Interface for filters
@@ -103,12 +106,85 @@ export const getAdminRecentActivity = async (
       todayCount: data.stats.todayCount,
       thisWeekCount: data.stats.thisWeekCount,
       totalCount: data.stats.totalCount,
+      unreadCount: data.stats.unreadCount,
     },
     filters: {
       activityType: data.filters.activityType,
       pharmacyId: data.filters.pharmacyId,
     },
     generatedAt: data.generatedAt,
+  };
+};
+
+/**
+ * Mark all admin activities as read
+ */
+export const markAllActivitiesAsRead = async (): Promise<{
+  success: boolean;
+  message: string;
+  updatedCount: number;
+  markedAt: string;
+}> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  console.log('📋 Marking all admin activities as read...');
+
+  const { data, error } = await db.rpc('mark_all_admin_activities_read');
+
+  if (error) {
+    throw new AppError(`Failed to mark activities as read: ${error.message}`, 400);
+  }
+
+  console.log(`✅ Marked ${data.updatedCount} activities as read`);
+
+  return {
+    success: data.success,
+    message: data.message,
+    updatedCount: data.updatedCount,
+    markedAt: data.markedAt,
+  };
+};
+
+/**
+ * Mark a single admin activity as read
+ */
+export const markActivityAsRead = async (activityId: string): Promise<{
+  success: boolean;
+  message: string;
+  activityId?: string;
+  markedAt?: string;
+}> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const db = supabaseAdmin;
+
+  console.log(`📋 Marking activity ${activityId} as read...`);
+
+  const { data, error } = await db.rpc('mark_admin_activity_read', {
+    p_activity_id: activityId,
+  });
+
+  if (error) {
+    throw new AppError(`Failed to mark activity as read: ${error.message}`, 400);
+  }
+
+  if (!data.success) {
+    throw new AppError(data.message, 404);
+  }
+
+  console.log(`✅ Marked activity ${activityId} as read`);
+
+  return {
+    success: data.success,
+    message: data.message,
+    activityId: data.activityId,
+    markedAt: data.markedAt,
   };
 };
 

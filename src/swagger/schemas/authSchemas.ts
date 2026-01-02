@@ -31,6 +31,32 @@ export const authSchemas = {
         example: '+1234567890',
         description: 'Contact phone number (optional)',
       },
+      physicalAddress: {
+        type: 'object',
+        description: 'Physical address of the pharmacy (optional)',
+        properties: {
+          street: {
+            type: 'string',
+            example: '123 Main Street',
+            description: 'Street address',
+          },
+          city: {
+            type: 'string',
+            example: 'New York',
+            description: 'City',
+          },
+          state: {
+            type: 'string',
+            example: 'NY',
+            description: 'State (2-letter code)',
+          },
+          zip: {
+            type: 'string',
+            example: '10001',
+            description: 'ZIP code',
+          },
+        },
+      },
     },
   },
   SigninRequest: {

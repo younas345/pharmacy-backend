@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAdminRecentActivityHandler } from '../controllers/adminRecentActivityController';
+import { getAdminRecentActivityHandler, markAllActivitiesAsReadHandler, markActivityAsReadHandler } from '../controllers/adminRecentActivityController';
 import { authenticateAdmin } from '../middleware/adminAuth';
 
 const router = Router();
@@ -105,6 +105,16 @@ router.use(authenticateAdmin);
  *                             type: string
  *                             format: date-time
  *                             example: "2025-12-31T10:30:00.000Z"
+ *                           isRead:
+ *                             type: boolean
+ *                             description: Whether the activity has been read by admin
+ *                             example: false
+ *                           readAt:
+ *                             type: string
+ *                             format: date-time
+ *                             nullable: true
+ *                             description: Timestamp when the activity was marked as read
+ *                             example: "2025-12-31T11:00:00.000Z"
  *                           pharmacy:
  *                             type: object
  *                             properties:
@@ -154,6 +164,10 @@ router.use(authenticateAdmin);
  *                           type: integer
  *                           description: Total number of activities
  *                           example: 150
+ *                         unreadCount:
+ *                           type: integer
+ *                           description: Number of unread activities
+ *                           example: 25
  *                     filters:
  *                       type: object
  *                       properties:
@@ -191,6 +205,120 @@ router.use(authenticateAdmin);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get('/', getAdminRecentActivityHandler);
+
+/**
+ * @swagger
+ * /api/admin/recent-activity/mark-all-read:
+ *   post:
+ *     summary: Mark all admin activities as read
+ *     description: Marks all unread activity records as read.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: All activities marked as read successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     success:
+ *                       type: boolean
+ *                       example: true
+ *                     message:
+ *                       type: string
+ *                       example: All activities marked as read
+ *                     updatedCount:
+ *                       type: integer
+ *                       description: Number of activities marked as read
+ *                       example: 15
+ *                     markedAt:
+ *                       type: string
+ *                       format: date-time
+ *                       example: "2025-01-02T10:30:00.000Z"
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/mark-all-read', markAllActivitiesAsReadHandler);
+
+/**
+ * @swagger
+ * /api/admin/recent-activity/{id}/read:
+ *   post:
+ *     summary: Mark a single admin activity as read
+ *     description: Marks a specific activity record as read.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Activity ID to mark as read
+ *         example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *     responses:
+ *       200:
+ *         description: Activity marked as read successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     success:
+ *                       type: boolean
+ *                       example: true
+ *                     message:
+ *                       type: string
+ *                       example: Activity marked as read
+ *                     activityId:
+ *                       type: string
+ *                       format: uuid
+ *                       example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+ *                     markedAt:
+ *                       type: string
+ *                       format: date-time
+ *                       example: "2025-01-02T10:30:00.000Z"
+ *       404:
+ *         description: Activity not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: error
+ *                 message:
+ *                   type: string
+ *                   example: Activity not found
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/:id/read', markActivityAsReadHandler);
 
 export default router;
 
