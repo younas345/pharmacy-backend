@@ -15,6 +15,17 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
+// Custom fetch with longer timeout (60 seconds) for slow network connections
+const customFetch = (url: string | Request | URL, options?: RequestInit) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+  
+  return fetch(url, {
+    ...options,
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeout));
+};
+
 // Client with anon key (subject to RLS policies)
 // Note: We handle token refresh manually through our API endpoints
 // so we disable auto-refresh to have full control over token lifecycle
@@ -22,6 +33,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: false, // We handle refresh manually via /api/auth/refresh
     persistSession: false, // Server-side doesn't need session persistence
+  },
+  global: {
+    fetch: customFetch,
   },
 });
 
@@ -31,6 +45,9 @@ export const supabaseAdmin = supabaseServiceKey
       auth: {
         autoRefreshToken: false,
         persistSession: false,
+      },
+      global: {
+        fetch: customFetch,
       },
     })
   : null;
