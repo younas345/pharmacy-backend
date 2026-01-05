@@ -1,22 +1,28 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../utils/appError';
 
-const sendErrorDev = (err: AppError, res: Response) => {
+const sendErrorDev = (err: any, res: Response) => {
   res.status(err.statusCode).json({
     status: err.status,
     error: err,
     message: err.message,
+    code: err.code || undefined, // Include error code for auth errors
     stack: err.stack,
   });
 };
 
-const sendErrorProd = (err: AppError, res: Response) => {
+const sendErrorProd = (err: any, res: Response) => {
   // Operational, trusted error: send message to client
   if (err.isOperational) {
-    res.status(err.statusCode).json({
+    const response: any = {
       status: err.status,
       message: err.message,
-    });
+    };
+    // Include error code for authentication errors (needed by frontend)
+    if (err.code) {
+      response.code = err.code;
+    }
+    res.status(err.statusCode).json(response);
   } else {
     // Programming or other unknown error: don't leak error details
     console.error('ERROR 💥', err);

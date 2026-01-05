@@ -786,12 +786,23 @@ BEGIN
         'dealId', ci.deal_id,
         'productName', d.product_name,
         'ndc', d.ndc,
+        'category', d.category,
+        'distributor', d.distributor_name,
         'quantity', ci.quantity,
         'unitPrice', ci.unit_price,
         'originalPrice', ci.original_price,
         'totalPrice', ci.quantity * ci.unit_price,
-        'savings', (ci.original_price - ci.unit_price) * ci.quantity
+        'savings', (ci.original_price - ci.unit_price) * ci.quantity,
+        'savingsPercent', ROUND(((ci.original_price - ci.unit_price) / ci.original_price * 100), 0),
+        'imageUrl', d.image_url,
+        'availableQuantity', d.quantity,
+        'minimumBuyQuantity', COALESCE(d.minimum_buy_quantity, 1),
+        'unit', d.unit,
+        'dealStatus', d.status,
+        'expiryDate', d.expiry_date,
+        'addedAt', ci.added_at
       )
+      ORDER BY ci.added_at DESC
     ), '[]'::jsonb),
     COALESCE(SUM(ci.quantity * ci.unit_price), 0),
     COALESCE(SUM((ci.original_price - ci.unit_price) * ci.quantity), 0),
@@ -812,7 +823,7 @@ BEGIN
     'issues', v_issues,
     'items', v_valid_items,
     'summary', jsonb_build_object(
-      'validItemCount', v_item_count,
+      'itemCount', v_item_count,
       'subtotal', v_subtotal,
       'totalSavings', v_total_savings,
       'estimatedTax', ROUND(v_subtotal * 0.08, 2),
