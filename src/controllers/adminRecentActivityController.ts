@@ -10,13 +10,31 @@ import { catchAsync } from '../utils/catchAsync';
  * 
  * Supports filtering by activity type and pharmacy
  * Supports pagination via limit and offset
+ * Supports filter parameter: 'notifications' (only registrations) or 'recentactivity' (all)
  */
 export const getAdminRecentActivityHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    // Get optional activity type filter
-    const activityType = req.query.activityType as string | undefined;
+    // Get filter parameter: 'notifications' or 'recentactivity'
+    const filter = req.query.filter as string | undefined;
     
-    // Validate activity type if provided
+    // Validate filter if provided
+    if (filter && !['notifications', 'recentactivity'].includes(filter)) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Invalid filter. Must be "notifications" or "recentactivity"',
+      });
+      return;
+    }
+
+    // Get optional activity type filter
+    let activityType = req.query.activityType as string | undefined;
+    
+    // If filter is 'notifications', override activityType to 'pharmacy_registered'
+    if (filter === 'notifications') {
+      activityType = 'pharmacy_registered';
+    }
+    
+    // Validate activity type if provided (and not overridden by filter)
     if (activityType && !['document_uploaded', 'product_added', 'pharmacy_registered'].includes(activityType)) {
       res.status(400).json({
         status: 'error',
@@ -39,7 +57,7 @@ export const getAdminRecentActivityHandler = catchAsync(
     // Get optional pharmacy ID filter
     const pharmacyId = req.query.pharmacyId as string | undefined;
 
-    const activityData = await getAdminRecentActivity(activityType, limit, offset, pharmacyId);
+    const activityData = await getAdminRecentActivity(activityType, limit, offset, pharmacyId, filter);
 
     res.status(200).json({
       status: 'success',

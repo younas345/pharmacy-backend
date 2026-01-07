@@ -41,6 +41,7 @@ DECLARE
   v_active_deals INTEGER;
   v_sold_deals INTEGER;
   v_expired_deals INTEGER;
+  v_deal_of_day_id UUID;
 BEGIN
   -- Calculate offset
   v_offset := (p_page - 1) * p_limit;
@@ -49,6 +50,38 @@ BEGIN
   UPDATE marketplace_deals
   SET status = 'expired', updated_at = NOW()
   WHERE status = 'active' AND expiry_date < CURRENT_DATE;
+  
+  -- Expire any manual Deal of the Day that has passed its expiration
+  UPDATE marketplace_deals
+  SET is_deal_of_the_day = FALSE,
+      deal_of_the_day_until = NULL,
+      updated_at = NOW()
+  WHERE is_deal_of_the_day = TRUE
+    AND deal_of_the_day_until IS NOT NULL
+    AND deal_of_the_day_until < NOW();
+  
+  -- Get Deal of the Day ID to exclude (manual or automatic)
+  -- First check for manual Deal of the Day
+  SELECT id INTO v_deal_of_day_id
+  FROM marketplace_deals
+  WHERE is_deal_of_the_day = TRUE
+    AND status = 'active'
+    AND expiry_date >= CURRENT_DATE
+    AND quantity > 0
+  LIMIT 1;
+  
+  -- If no manual deal, get automatic selection (best savings)
+  IF v_deal_of_day_id IS NULL THEN
+    SELECT id INTO v_deal_of_day_id
+    FROM marketplace_deals
+    WHERE status = 'active'
+      AND expiry_date >= CURRENT_DATE
+      AND quantity > 0
+    ORDER BY 
+      ROUND(((original_price - deal_price) / original_price * 100), 0) DESC,
+      posted_date DESC
+    LIMIT 1;
+  END IF;
   
   -- Get unique categories from all deals
   SELECT COALESCE(jsonb_agg(DISTINCT category ORDER BY category), '[]'::jsonb)
@@ -71,7 +104,7 @@ BEGIN
     'categories', v_categories
   );
   
-  -- Count total matching deals
+  -- Count total matching deals (excluding Deal of the Day - manual or automatic)
   SELECT COUNT(*)::INTEGER
   INTO v_total
   FROM marketplace_deals d
@@ -83,7 +116,8 @@ BEGIN
       d.ndc ILIKE '%' || p_search || '%' OR
       d.category ILIKE '%' || p_search || '%')
     AND (p_category IS NULL OR p_category = '' OR p_category = 'all' OR d.category = p_category)
-    AND (p_status IS NULL OR p_status = '' OR p_status = 'all' OR d.status = p_status);
+    AND (p_status IS NULL OR p_status = '' OR p_status = 'all' OR d.status = p_status)
+    AND (v_deal_of_day_id IS NULL OR d.id != v_deal_of_day_id);
   
   -- Fetch deals with dynamic sorting
   SELECT COALESCE(jsonb_agg(deal_row), '[]'::jsonb)
@@ -122,6 +156,7 @@ BEGIN
         d.category ILIKE '%' || p_search || '%')
       AND (p_category IS NULL OR p_category = '' OR p_category = 'all' OR d.category = p_category)
       AND (p_status IS NULL OR p_status = '' OR p_status = 'all' OR d.status = p_status)
+      AND (v_deal_of_day_id IS NULL OR d.id != v_deal_of_day_id)
     ORDER BY
       CASE WHEN p_sort_order = 'desc' THEN
         CASE p_sort_by
@@ -309,6 +344,7 @@ DECLARE
   v_existing_quantity INTEGER;
   v_new_quantity INTEGER;
   v_cart_item JSONB;
+  v_effective_minimum INTEGER;
 BEGIN
   -- Validate quantity
   IF p_quantity < 1 THEN
@@ -318,8 +354,8 @@ BEGIN
     );
   END IF;
   
-  -- Get deal details and check if active
-  SELECT id, product_name, deal_price, original_price, quantity, status, image_url, ndc, distributor_name
+  -- Get deal details and check if active (including minimum_buy_quantity)
+  SELECT id, product_name, deal_price, original_price, quantity, status, image_url, ndc, distributor_name, COALESCE(minimum_buy_quantity, 1) as minimum_buy_quantity
   INTO v_deal
   FROM marketplace_deals
   WHERE id = p_deal_id;
@@ -344,6 +380,18 @@ BEGIN
     RETURN jsonb_build_object(
       'error', true,
       'message', 'Requested quantity exceeds available stock (' || v_deal.quantity || ' available)'
+    );
+  END IF;
+  
+  -- Calculate effective minimum: if available quantity is less than minimum_buy_quantity,
+  -- then the remaining stock becomes the effective minimum (allow ordering all remaining stock)
+  v_effective_minimum := LEAST(v_deal.minimum_buy_quantity, v_deal.quantity);
+  
+  -- Check minimum buy quantity (but allow if ordering all remaining stock)
+  IF p_quantity < v_effective_minimum THEN
+    RETURN jsonb_build_object(
+      'error', true,
+      'message', 'Minimum order quantity is ' || v_effective_minimum || ' units'
     );
   END IF;
   
@@ -753,7 +801,8 @@ BEGIN
     );
   END IF;
   
-  -- Find items with issues (deal not active, quantity exceeds stock)
+  -- Find items with issues (deal not active, quantity exceeds stock, or below minimum)
+  -- Note: If available quantity < minimum_buy_quantity, then remaining stock becomes the effective minimum
   FOR v_issue_record IN
     SELECT 
       ci.id as item_id,
@@ -761,16 +810,26 @@ BEGIN
       d.product_name,
       ci.quantity as cart_quantity,
       d.quantity as available_quantity,
+      COALESCE(d.minimum_buy_quantity, 1) as minimum_buy_quantity,
+      -- Effective minimum: the lesser of minimum_buy_quantity and available_quantity
+      LEAST(COALESCE(d.minimum_buy_quantity, 1), d.quantity) as effective_minimum,
       d.status as deal_status,
       CASE 
         WHEN d.status != 'active' THEN 'Deal is no longer available (status: ' || d.status || ')'
         WHEN ci.quantity > d.quantity THEN 'Quantity in cart (' || ci.quantity || ') exceeds available stock (' || d.quantity || ')'
+        -- Only flag as below minimum if cart quantity is less than the effective minimum
+        WHEN ci.quantity < LEAST(COALESCE(d.minimum_buy_quantity, 1), d.quantity) THEN 
+          'Minimum order quantity is ' || LEAST(COALESCE(d.minimum_buy_quantity, 1), d.quantity) || ' units'
         ELSE NULL
       END as issue
     FROM pharmacy_cart_items ci
     JOIN marketplace_deals d ON d.id = ci.deal_id
     WHERE ci.cart_id = v_cart_id
-      AND (d.status != 'active' OR ci.quantity > d.quantity)
+      AND (
+        d.status != 'active' 
+        OR ci.quantity > d.quantity
+        OR ci.quantity < LEAST(COALESCE(d.minimum_buy_quantity, 1), d.quantity)
+      )
   LOOP
     v_issues := v_issues || jsonb_build_object(
       'itemId', v_issue_record.item_id,
@@ -781,6 +840,7 @@ BEGIN
   END LOOP;
   
   -- Get valid items and totals
+  -- Valid items must: be active, not exceed stock, and meet effective minimum (min of minimum_buy_quantity and available stock)
   SELECT 
     COALESCE(jsonb_agg(
       jsonb_build_object(
@@ -799,6 +859,7 @@ BEGIN
         'imageUrl', d.image_url,
         'availableQuantity', d.quantity,
         'minimumBuyQuantity', COALESCE(d.minimum_buy_quantity, 1),
+        'effectiveMinimum', LEAST(COALESCE(d.minimum_buy_quantity, 1), d.quantity),
         'unit', d.unit,
         'dealStatus', d.status,
         'expiryDate', d.expiry_date,
@@ -814,7 +875,8 @@ BEGIN
   JOIN marketplace_deals d ON d.id = ci.deal_id
   WHERE ci.cart_id = v_cart_id
     AND d.status = 'active'
-    AND ci.quantity <= d.quantity;
+    AND ci.quantity <= d.quantity
+    AND ci.quantity >= LEAST(COALESCE(d.minimum_buy_quantity, 1), d.quantity);
   
   RETURN jsonb_build_object(
     'valid', jsonb_array_length(v_issues) = 0,

@@ -111,6 +111,7 @@ export const createMarketplaceDealHandler = catchAsync(
     const productName = req.body.productName;
     const category = req.body.category;
     const quantity = req.body.quantity ? parseInt(req.body.quantity, 10) : undefined;
+    const minimumBuyQuantity = req.body.minimumBuyQuantity ? parseInt(req.body.minimumBuyQuantity, 10) : undefined;
     const unit = req.body.unit;
     const originalPrice = req.body.originalPrice ? parseFloat(req.body.originalPrice) : undefined;
     const dealPrice = req.body.dealPrice ? parseFloat(req.body.dealPrice) : undefined;
@@ -130,6 +131,9 @@ export const createMarketplaceDealHandler = catchAsync(
     // Validate numeric values
     if (isNaN(quantity) || quantity <= 0) {
       throw new AppError('Quantity must be a valid positive number', 400);
+    }
+    if (minimumBuyQuantity !== undefined && (isNaN(minimumBuyQuantity) || minimumBuyQuantity < 1)) {
+      throw new AppError('Minimum buy quantity must be at least 1', 400);
     }
     if (isNaN(originalPrice) || originalPrice <= 0) {
       throw new AppError('Original price must be a valid positive number', 400);
@@ -163,6 +167,7 @@ export const createMarketplaceDealHandler = catchAsync(
       notes,
       imageUrl,
       createdBy: req.adminId,
+      minimumBuyQuantity,
     });
 
     res.status(201).json({

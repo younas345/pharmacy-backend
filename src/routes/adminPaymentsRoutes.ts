@@ -141,6 +141,20 @@ router.use(authenticateAdmin);
  *           format: uuid
  *         description: Filter by pharmacy ID
  *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Filter payments from this date onwards. Format YYYY-MM-DD
+ *         example: "2025-01-01"
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Filter payments up to this date. Format YYYY-MM-DD
+ *         example: "2025-12-31"
+ *       - in: query
  *         name: page
  *         schema:
  *           type: integer
