@@ -2720,6 +2720,7 @@ export interface ExistingPackageInfo {
 export interface PackageSuggestionWithStatus extends DistributorPackage {
   alreadyCreated: boolean;
   existingPackage?: ExistingPackageInfo; // Existing package info when alreadyCreated is true
+  recommended: boolean; // true for the distributor with highest total value
 }
 
 // Interface for package suggestions response
@@ -2999,14 +3000,12 @@ export const getPackageSuggestionsByNdcs = async (
     });
   });
 
-  // Step 6: For each product, find the best distributor
-  const productDistributorMap: Record<
-    string,
-    {
-      distributorName: string;
-      pricePerUnit: number;
-    }
-  > = {};
+  // Step 6: Build pricing map for ALL distributors (not just the best one)
+  // Map: NDC -> Array of { distributorName, pricePerUnit }
+  const ndcToDistributorPricesMap: Record<string, Array<{ distributorName: string; pricePerUnit: number }>> = {};
+  
+  // Track which NDCs have pricing from any distributor
+  const ndcsWithPricing = new Set<string>();
 
   normalizedItems.forEach((item) => {
     const ndc = item.ndc;
@@ -3028,7 +3027,7 @@ export const getPackageSuggestionsByNdcs = async (
       distributorPrices[distName].count += 1;
     });
 
-    const distributorAverages: Array<{ name: string; price: number }> = Object.entries(
+    const distributorAverages: Array<{ distributorName: string; pricePerUnit: number }> = Object.entries(
       distributorPrices
     )
       .filter(([_, data]) => data.count > 0)
@@ -3036,55 +3035,71 @@ export const getPackageSuggestionsByNdcs = async (
         const distributorName = name.trim();
         const distributorNdcKey = `${distributorName}|${ndc}`;
         const latestPrice = distributorNdcToLatestPriceMap[distributorNdcKey];
-        const price = latestPrice !== undefined ? latestPrice : data.totalPrice / data.count;
-        return { name: distributorName, price };
+        const pricePerUnit = latestPrice !== undefined ? latestPrice : data.totalPrice / data.count;
+        return { distributorName, pricePerUnit };
       });
 
     if (distributorAverages.length === 0) {
       return;
     }
 
-    distributorAverages.sort((a, b) => b.price - a.price);
-
-    productDistributorMap[ndc] = {
-      distributorName: distributorAverages[0].name,
-      pricePerUnit: distributorAverages[0].price,
-    };
+    // Store ALL distributors for this NDC (sorted by price descending)
+    distributorAverages.sort((a, b) => b.pricePerUnit - a.pricePerUnit);
+    ndcToDistributorPricesMap[ndc] = distributorAverages;
+    ndcsWithPricing.add(ndc);
   });
 
-  // Step 7: Group products by distributor
-  // IMPORTANT: Do NOT merge products with same NDC - treat each item separately
+  // Step 7: Build packages for ALL distributors (not just the best one)
+  // Each distributor gets a package with all NDCs they have pricing for
+  const allDistributorNames = new Set<string>();
+  Object.values(ndcToDistributorPricesMap).forEach((prices) => {
+    prices.forEach((p) => allDistributorNames.add(p.distributorName));
+  });
+
   const distributorPackagesMap: Record<string, PackageProduct[]> = {};
 
-  normalizedItems.forEach((item) => {
-    const ndc = item.ndc;
-    const distributorInfo = productDistributorMap[ndc];
+  // For each distributor, build their package with all NDCs they support
+  allDistributorNames.forEach((distributorName) => {
+    distributorPackagesMap[distributorName] = [];
 
-    if (!distributorInfo) {
-      return;
-    }
+    normalizedItems.forEach((item) => {
+      const ndc = item.ndc;
+      const distributorPrices = ndcToDistributorPricesMap[ndc];
 
-    const fullUnits = item.full;
-    const partialUnits = item.partial;
-    const totalUnits = fullUnits + partialUnits || 1;
-    const pricePerUnit = distributorInfo.pricePerUnit;
-    const totalValue = pricePerUnit * totalUnits;
+      if (!distributorPrices) {
+        return;
+      }
 
-    if (!distributorPackagesMap[distributorInfo.distributorName]) {
-      distributorPackagesMap[distributorInfo.distributorName] = [];
-    }
+      // Find this distributor's price for this NDC
+      const distributorPrice = distributorPrices.find((p) => p.distributorName === distributorName);
 
-    // Include productId from input if available
-    // Use productName from input if provided, otherwise fallback to database
-    distributorPackagesMap[distributorInfo.distributorName].push({
-      ndc,
-      productId: item.productId || undefined,
-      productName: item.productName || ndcToProductNameMap[ndc] || `Product ${ndc}`,
-      full: fullUnits,
-      partial: partialUnits,
-      pricePerUnit,
-      totalValue,
+      if (!distributorPrice) {
+        return; // This distributor doesn't have pricing for this NDC
+      }
+
+      const fullUnits = item.full;
+      const partialUnits = item.partial;
+      const totalUnits = fullUnits + partialUnits || 1;
+      const pricePerUnit = distributorPrice.pricePerUnit;
+      const totalValue = pricePerUnit * totalUnits;
+
+      distributorPackagesMap[distributorName].push({
+        ndc,
+        productId: item.productId || undefined,
+        productName: item.productName || ndcToProductNameMap[ndc] || `Product ${ndc}`,
+        full: fullUnits,
+        partial: partialUnits,
+        pricePerUnit,
+        totalValue,
+      });
     });
+  });
+
+  // Remove distributors with no products
+  Object.keys(distributorPackagesMap).forEach((distName) => {
+    if (distributorPackagesMap[distName].length === 0) {
+      delete distributorPackagesMap[distName];
+    }
   });
 
   // Step 8: Fetch distributor contact information
@@ -3165,7 +3180,7 @@ export const getPackageSuggestionsByNdcs = async (
   }
 
   // Step 10: Build package suggestions with alreadyCreated flag and existing package info
-  const packages: PackageSuggestionWithStatus[] = Object.entries(distributorPackagesMap).map(
+  const packagesUnsorted: PackageSuggestionWithStatus[] = Object.entries(distributorPackagesMap).map(
     ([distributorName, packageProducts]) => {
       const totalItems = packageProducts.reduce((sum, p) => sum + p.full + p.partial, 0);
       const totalEstimatedValue = packageProducts.reduce((sum, p) => sum + p.totalValue, 0);
@@ -3182,15 +3197,22 @@ export const getPackageSuggestionsByNdcs = async (
         averagePricePerUnit: Math.round(averagePricePerUnit * 100) / 100,
         alreadyCreated: isAlreadyCreated,
         existingPackage: isAlreadyCreated ? existingPackagesMap[distributorName] : undefined,
+        recommended: false, // Will be set after sorting
       };
     }
   );
 
   // Sort packages by total estimated value (highest first)
-  packages.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
+  packagesUnsorted.sort((a, b) => b.totalEstimatedValue - a.totalEstimatedValue);
+
+  // Mark the first package (highest value) as recommended
+  const packages = packagesUnsorted.map((pkg, index) => ({
+    ...pkg,
+    recommended: index === 0, // First package (highest total value) is recommended
+  }));
 
   // Calculate summary statistics
-  const productsWithPricing = Object.keys(productDistributorMap).length;
+  const productsWithPricing = ndcsWithPricing.size;
   const productsWithoutPricing = normalizedItems.length - productsWithPricing;
   const totalEstimatedValue = packages.reduce((sum, pkg) => sum + pkg.totalEstimatedValue, 0);
   const packagesAlreadyCreated = packages.filter((pkg) => pkg.alreadyCreated).length;
