@@ -14,6 +14,8 @@ export const getPaymentsListHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const search = req.query.search as string | undefined;
     const pharmacyId = req.query.pharmacy_id as string | undefined;
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
 
@@ -24,7 +26,15 @@ export const getPaymentsListHandler = catchAsync(
       throw new AppError('Limit must be between 1 and 100', 400);
     }
 
-    const result = await getPaymentsList(search, pharmacyId, page, limit);
+    // Validate date formats if provided
+    if (startDate && isNaN(Date.parse(startDate))) {
+      throw new AppError('Invalid startDate format. Use YYYY-MM-DD', 400);
+    }
+    if (endDate && isNaN(Date.parse(endDate))) {
+      throw new AppError('Invalid endDate format. Use YYYY-MM-DD', 400);
+    }
+
+    const result = await getPaymentsList(search, pharmacyId, page, limit, startDate, endDate);
 
     res.status(200).json({
       status: 'success',

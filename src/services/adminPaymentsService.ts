@@ -76,7 +76,9 @@ export const getPaymentsList = async (
   search?: string,
   pharmacyId?: string,
   page: number = 1,
-  limit: number = 10
+  limit: number = 10,
+  startDate?: string,
+  endDate?: string
 ): Promise<PaymentsListResponse> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
@@ -87,6 +89,8 @@ export const getPaymentsList = async (
     p_pharmacy_id: pharmacyId || null,
     p_page: page,
     p_limit: limit,
+    p_start_date: startDate || null,
+    p_end_date: endDate || null,
   });
 
   if (error) {

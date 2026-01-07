@@ -4,16 +4,19 @@
 -- =====================================================
 
 -- =====================================================
--- Function 1: Get payments list with pagination, search AND stats
+-- Function 1: Get payments list with pagination, search, date filter AND stats
 -- Stats are included in the response (merged from stats function)
 -- =====================================================
 DROP FUNCTION IF EXISTS get_admin_payments_list(text, uuid, integer, integer);
+DROP FUNCTION IF EXISTS get_admin_payments_list(text, uuid, integer, integer, date, date);
 
 CREATE OR REPLACE FUNCTION get_admin_payments_list(
   p_search text DEFAULT NULL,
   p_pharmacy_id uuid DEFAULT NULL,
   p_page integer DEFAULT 1,
-  p_limit integer DEFAULT 10
+  p_limit integer DEFAULT 10,
+  p_start_date date DEFAULT NULL,
+  p_end_date date DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -57,7 +60,9 @@ BEGIN
       OR ud.id::text ILIKE p_search || '%'
       OR rd.name ILIKE p_search || '%'
     )
-    AND (p_pharmacy_id IS NULL OR ud.pharmacy_id = p_pharmacy_id);
+    AND (p_pharmacy_id IS NULL OR ud.pharmacy_id = p_pharmacy_id)
+    AND (p_start_date IS NULL OR COALESCE(ud.report_date, ud.uploaded_at::date) >= p_start_date)
+    AND (p_end_date IS NULL OR COALESCE(ud.report_date, ud.uploaded_at::date) <= p_end_date);
 
   -- Calculate total pages
   v_total_pages := CEIL(v_total_count::numeric / p_limit);
@@ -108,6 +113,8 @@ BEGIN
       OR rd.name ILIKE p_search || '%'
     )
     AND (p_pharmacy_id IS NULL OR ud.pharmacy_id = p_pharmacy_id)
+    AND (p_start_date IS NULL OR COALESCE(ud.report_date, ud.uploaded_at::date) >= p_start_date)
+    AND (p_end_date IS NULL OR COALESCE(ud.report_date, ud.uploaded_at::date) <= p_end_date)
   LIMIT p_limit
   OFFSET v_offset;
 
@@ -136,10 +143,10 @@ END;
 $$;
 
 -- Grant permissions
-GRANT EXECUTE ON FUNCTION get_admin_payments_list(text, uuid, integer, integer) TO authenticated;
-GRANT EXECUTE ON FUNCTION get_admin_payments_list(text, uuid, integer, integer) TO service_role;
+GRANT EXECUTE ON FUNCTION get_admin_payments_list(text, uuid, integer, integer, date, date) TO authenticated;
+GRANT EXECUTE ON FUNCTION get_admin_payments_list(text, uuid, integer, integer, date, date) TO service_role;
 
-COMMENT ON FUNCTION get_admin_payments_list IS 'Get paginated list of payments with stats included (merged stats into list)';
+COMMENT ON FUNCTION get_admin_payments_list IS 'Get paginated list of payments with date filtering and stats included';
 
 
 -- =====================================================
