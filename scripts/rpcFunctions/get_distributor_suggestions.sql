@@ -276,25 +276,35 @@ BEGIN
         GROUP BY dp.distributor_id, dp.distributor_name, dp.contact_email, dp.contact_phone, dp.location, dp.fee_rates
     ),
     
+    -- Add row number to identify recommended (first one with highest value)
+    distributor_ranked AS (
+        SELECT 
+            da.*,
+            ROW_NUMBER() OVER (ORDER BY da.total_estimated_value DESC) AS rank
+        FROM distributor_aggregated da
+    ),
+    
     -- Build distributors array sorted by total value DESC
+    -- First distributor (highest total value) is marked as recommended
     distributors_json AS (
         SELECT jsonb_agg(
             jsonb_build_object(
-                'distributorName', da.distributor_name,
-                'distributorId', da.distributor_id,
+                'distributorName', dr.distributor_name,
+                'distributorId', dr.distributor_id,
                 'distributorContact', jsonb_build_object(
-                    'email', da.contact_email,
-                    'phone', da.contact_phone,
-                    'location', da.location
+                    'email', dr.contact_email,
+                    'phone', dr.contact_phone,
+                    'location', dr.location
                 ),
-                'feeRates', da.fee_rates,
-                'products', da.products,
-                'totalItems', da.total_items,
-                'totalEstimatedValue', da.total_estimated_value,
-                'ndcsCount', da.ndcs_count
-            ) ORDER BY da.total_estimated_value DESC
+                'feeRates', dr.fee_rates,
+                'products', dr.products,
+                'totalItems', dr.total_items,
+                'totalEstimatedValue', dr.total_estimated_value,
+                'ndcsCount', dr.ndcs_count,
+                'recommended', dr.rank = 1  -- First distributor (highest value) is recommended
+            ) ORDER BY dr.total_estimated_value DESC
         ) AS distributors
-        FROM distributor_aggregated da
+        FROM distributor_ranked dr
     ),
     
     -- Find NDCs without any pricing from any distributor

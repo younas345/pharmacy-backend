@@ -56,7 +56,8 @@ BEGIN
     );
   END IF;
   
-  -- Validate all items are still valid (active deals with available stock)
+  -- Validate all items are still valid (active deals with available stock and meeting minimum quantity)
+  -- Note: If available quantity < minimum_buy_quantity, then remaining stock becomes the effective minimum
   FOR v_cart_item IN
     SELECT 
       ci.id,
@@ -64,7 +65,9 @@ BEGIN
       ci.quantity,
       d.product_name,
       d.status,
-      d.quantity as available_quantity
+      d.quantity as available_quantity,
+      COALESCE(d.minimum_buy_quantity, 1) as minimum_buy_quantity,
+      LEAST(COALESCE(d.minimum_buy_quantity, 1), d.quantity) as effective_minimum
     FROM pharmacy_cart_items ci
     JOIN marketplace_deals d ON d.id = ci.deal_id
     WHERE ci.cart_id = v_cart_id
@@ -81,6 +84,15 @@ BEGIN
       RETURN jsonb_build_object(
         'error', true,
         'message', 'Insufficient stock for "' || v_cart_item.product_name || '". Available: ' || v_cart_item.available_quantity,
+        'dealId', v_cart_item.deal_id
+      );
+    END IF;
+    
+    -- Check minimum quantity (effective minimum is the lesser of minimum_buy_quantity and available stock)
+    IF v_cart_item.quantity < v_cart_item.effective_minimum THEN
+      RETURN jsonb_build_object(
+        'error', true,
+        'message', 'Minimum order quantity for "' || v_cart_item.product_name || '" is ' || v_cart_item.effective_minimum || ' units',
         'dealId', v_cart_item.deal_id
       );
     END IF;
@@ -327,7 +339,7 @@ BEGIN
     );
   END IF;
   
-  -- Get order items
+  -- Get order items with image from marketplace_deals
   SELECT COALESCE(jsonb_agg(
     jsonb_build_object(
       'id', oi.id,
@@ -340,11 +352,13 @@ BEGIN
       'unitPrice', oi.unit_price,
       'originalPrice', oi.original_price,
       'lineTotal', oi.line_total,
-      'lineSavings', oi.line_savings
+      'lineSavings', oi.line_savings,
+      'imageUrl', d.image_url
     )
   ), '[]'::jsonb)
   INTO v_items
   FROM marketplace_order_items oi
+  LEFT JOIN marketplace_deals d ON d.id = oi.deal_id
   WHERE oi.order_id = p_order_id;
   
   v_order := v_order || jsonb_build_object('items', v_items);

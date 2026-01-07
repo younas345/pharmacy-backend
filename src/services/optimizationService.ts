@@ -2235,6 +2235,7 @@ export interface DistributorSuggestion {
   totalEstimatedValue: number;
   averagePricePerUnit: number;
   available: boolean;
+  recommended: boolean; // true for the distributor with the highest price (best value)
 }
 
 export interface NdcSuggestionResponse {
@@ -2548,7 +2549,8 @@ export const getDistributorSuggestionsByNdc = async (
   }
 
   // Step 7: Build distributor suggestions
-  const distributors: DistributorSuggestion[] = distributorAverages.map((dist) => {
+  // First distributor (index 0) is recommended - it has the highest price (best value)
+  const distributors: DistributorSuggestion[] = distributorAverages.map((dist, index) => {
     const totalEstimatedValue = dist.averagePricePerUnit * quantity;
 
     return {
@@ -2559,6 +2561,7 @@ export const getDistributorSuggestionsByNdc = async (
       totalEstimatedValue: Math.round(totalEstimatedValue * 100) / 100,
       averagePricePerUnit: Math.round(dist.averagePricePerUnit * 100) / 100,
       available: true, // Assuming available if found in return reports
+      recommended: index === 0, // First distributor (highest price) is recommended
     };
   });
 
