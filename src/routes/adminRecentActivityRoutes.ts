@@ -12,23 +12,7 @@ router.use(authenticateAdmin);
  * /api/admin/recent-activity:
  *   get:
  *     summary: Get admin recent activity
- *     description: |
- *       Returns recent activity records for the admin dashboard including:
- *       - Document uploads by pharmacies
- *       - Product additions by pharmacies
- *       - New pharmacy registrations
- *       
- *       Activities are recorded automatically via database triggers when:
- *       - A pharmacy uploads a new document
- *       - A pharmacy adds a new product to their list
- *       - A new pharmacy registers
- *       
- *       Supports filtering by activity type and pharmacy ID.
- *       Supports pagination via limit and offset parameters.
- *       
- *       Use the `filter` parameter to quickly switch between:
- *       - `notifications` - Only returns pharmacy registration records
- *       - `recentactivity` - Returns all activity types (default behavior)
+ *     description: Returns recent activity records for the admin dashboard including document uploads product additions and new pharmacy registrations. Activities are recorded automatically via database triggers. Supports filtering by activity type and pharmacy ID and pagination via limit and offset parameters. Use the filter parameter to quickly switch between views.
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
@@ -38,17 +22,14 @@ router.use(authenticateAdmin);
  *         schema:
  *           type: string
  *           enum: [notifications, recentactivity]
- *         description: |
- *           Quick filter option:
- *           - `notifications` - Only returns pharmacy_registered records
- *           - `recentactivity` - Returns all activity types (same as not providing filter)
+ *         description: Quick filter option. Use notifications for only pharmacy_registered records, or recentactivity for all activity types
  *         example: notifications
  *       - in: query
  *         name: activityType
  *         schema:
  *           type: string
  *           enum: [document_uploaded, product_added, pharmacy_registered]
- *         description: Filter by activity type. If not provided, returns all types. Note: If `filter=notifications`, this is overridden to `pharmacy_registered`.
+ *         description: Filter by activity type. If not provided returns all types. When filter is notifications this is overridden to pharmacy_registered
  *         example: document_uploaded
  *       - in: query
  *         name: limit
@@ -57,7 +38,7 @@ router.use(authenticateAdmin);
  *           minimum: 1
  *           maximum: 100
  *           default: 20
- *         description: Number of records to return (default 20, max 100)
+ *         description: Number of records to return. Default 20 max 100
  *         example: 20
  *       - in: query
  *         name: offset
@@ -65,7 +46,7 @@ router.use(authenticateAdmin);
  *           type: integer
  *           minimum: 0
  *           default: 0
- *         description: Offset for pagination (default 0)
+ *         description: Offset for pagination default 0
  *         example: 0
  *       - in: query
  *         name: pharmacyId
@@ -198,7 +179,7 @@ router.use(authenticateAdmin);
  *                           type: string
  *                           nullable: true
  *                           enum: [notifications, recentactivity]
- *                           description: Quick filter applied (notifications or recentactivity)
+ *                           description: Quick filter applied - notifications or recentactivity
  *                     generatedAt:
  *                       type: string
  *                       format: date-time
