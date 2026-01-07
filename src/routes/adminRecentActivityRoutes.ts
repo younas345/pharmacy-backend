@@ -25,16 +25,30 @@ router.use(authenticateAdmin);
  *       
  *       Supports filtering by activity type and pharmacy ID.
  *       Supports pagination via limit and offset parameters.
+ *       
+ *       Use the `filter` parameter to quickly switch between:
+ *       - `notifications` - Only returns pharmacy registration records
+ *       - `recentactivity` - Returns all activity types (default behavior)
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
+ *         name: filter
+ *         schema:
+ *           type: string
+ *           enum: [notifications, recentactivity]
+ *         description: |
+ *           Quick filter option:
+ *           - `notifications` - Only returns pharmacy_registered records
+ *           - `recentactivity` - Returns all activity types (same as not providing filter)
+ *         example: notifications
+ *       - in: query
  *         name: activityType
  *         schema:
  *           type: string
  *           enum: [document_uploaded, product_added, pharmacy_registered]
- *         description: Filter by activity type. If not provided, returns all types.
+ *         description: Filter by activity type. If not provided, returns all types. Note: If `filter=notifications`, this is overridden to `pharmacy_registered`.
  *         example: document_uploaded
  *       - in: query
  *         name: limit
@@ -180,6 +194,11 @@ router.use(authenticateAdmin);
  *                           format: uuid
  *                           nullable: true
  *                           description: Pharmacy ID filter applied
+ *                         filter:
+ *                           type: string
+ *                           nullable: true
+ *                           enum: [notifications, recentactivity]
+ *                           description: Quick filter applied (notifications or recentactivity)
  *                     generatedAt:
  *                       type: string
  *                       format: date-time

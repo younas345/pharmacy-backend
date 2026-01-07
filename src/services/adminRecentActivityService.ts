@@ -42,6 +42,7 @@ export interface ActivityStats {
 export interface ActivityFilters {
   activityType: string | null;
   pharmacyId: string | null;
+  filter: string | null; // 'notifications' or 'recentactivity'
 }
 
 // Interface for recent activity response
@@ -60,12 +61,14 @@ export interface RecentActivityResponse {
  * @param limit - Number of records to return (default: 20)
  * @param offset - Offset for pagination (default: 0)
  * @param pharmacyId - Optional filter by pharmacy ID
+ * @param filter - Optional filter: 'notifications' (only registrations) or 'recentactivity' (all)
  */
 export const getAdminRecentActivity = async (
   activityType?: string,
   limit: number = 20,
   offset: number = 0,
-  pharmacyId?: string
+  pharmacyId?: string,
+  filter?: string
 ): Promise<RecentActivityResponse> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
@@ -73,7 +76,7 @@ export const getAdminRecentActivity = async (
 
   const db = supabaseAdmin;
 
-  console.log(`📋 Fetching admin recent activity via RPC (type: ${activityType || 'all'}, limit: ${limit}, offset: ${offset}, pharmacyId: ${pharmacyId || 'all'})`);
+  console.log(`📋 Fetching admin recent activity via RPC (filter: ${filter || 'none'}, type: ${activityType || 'all'}, limit: ${limit}, offset: ${offset}, pharmacyId: ${pharmacyId || 'all'})`);
 
   // Call PostgreSQL function - all logic done in database
   const { data, error } = await db.rpc('get_admin_recent_activity', {
@@ -111,6 +114,7 @@ export const getAdminRecentActivity = async (
     filters: {
       activityType: data.filters.activityType,
       pharmacyId: data.filters.pharmacyId,
+      filter: filter || null,
     },
     generatedAt: data.generatedAt,
   };
