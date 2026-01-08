@@ -317,26 +317,34 @@ export const markDealAsSold = async (dealId: string): Promise<void> => {
   }
 };
 
+// ============================================================
+// Featured Deal Type
+// ============================================================
+export type FeaturedDealType = 'day' | 'week' | 'month';
+
 /**
- * Set Deal of the Day
+ * Set Featured Deal (supports day, week, month via type parameter)
+ * Used by: POST /api/admin/marketplace/deals/:id/set-deal-of-the-day
  */
 export const setDealOfTheDay = async (
   dealId: string,
-  expiresAt?: string
-): Promise<{ message: string; dealId: string; productName: string; expiresAt?: string }> => {
+  expiresAt?: string,
+  type: FeaturedDealType = 'day'
+): Promise<{ message: string; dealId: string; productName: string; type: string; expiresAt?: string }> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
 
   const expiresAtTimestamp = expiresAt ? new Date(expiresAt).toISOString() : null;
 
-  const { data, error } = await supabaseAdmin.rpc('set_deal_of_the_day', {
+  const { data, error } = await supabaseAdmin.rpc('set_featured_deal', {
     p_deal_id: dealId,
+    p_type: type,
     p_expires_at: expiresAtTimestamp,
   });
 
   if (error) {
-    throw new AppError(`Failed to set Deal of the Day: ${error.message}`, 400);
+    throw new AppError(`Failed to set featured deal: ${error.message}`, 400);
   }
 
   if (data.error) {
@@ -347,22 +355,28 @@ export const setDealOfTheDay = async (
     message: data.message,
     dealId: data.dealId,
     productName: data.productName,
+    type: data.type,
     expiresAt: data.expiresAt || undefined,
   };
 };
 
 /**
- * Unset Deal of the Day
+ * Unset Featured Deal (supports day, week, month via type parameter)
+ * Used by: DELETE /api/admin/marketplace/deal-of-the-day
  */
-export const unsetDealOfTheDay = async (): Promise<{ message: string; dealsUnset: number }> => {
+export const unsetDealOfTheDay = async (
+  type: FeaturedDealType = 'day'
+): Promise<{ message: string; type: string; dealsUnset: number }> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
 
-  const { data, error } = await supabaseAdmin.rpc('unset_deal_of_the_day');
+  const { data, error } = await supabaseAdmin.rpc('unset_featured_deal', {
+    p_type: type,
+  });
 
   if (error) {
-    throw new AppError(`Failed to unset Deal of the Day: ${error.message}`, 400);
+    throw new AppError(`Failed to unset featured deal: ${error.message}`, 400);
   }
 
   if (data.error) {
@@ -371,14 +385,20 @@ export const unsetDealOfTheDay = async (): Promise<{ message: string; dealsUnset
 
   return {
     message: data.message,
+    type: data.type,
     dealsUnset: data.dealsUnset,
   };
 };
 
 /**
- * Get current Deal of the Day info (for admin)
+ * Get Featured Deal info (supports day, week, month via type parameter)
+ * Used by: GET /api/admin/marketplace/deal-of-the-day
  */
-export const getDealOfTheDayInfo = async (): Promise<{
+export const getDealOfTheDayInfo = async (
+  type: FeaturedDealType = 'day'
+): Promise<{
+  type: string;
+  typeLabel: string;
   deal: MarketplaceDeal | null;
   manualDeal: any;
   hasManualSelection: boolean;
@@ -387,16 +407,46 @@ export const getDealOfTheDayInfo = async (): Promise<{
     throw new AppError('Supabase admin client not configured', 500);
   }
 
-  const { data, error } = await supabaseAdmin.rpc('get_current_deal_of_the_day_info');
+  const { data, error } = await supabaseAdmin.rpc('get_featured_deal_info', {
+    p_type: type,
+  });
 
   if (error) {
-    throw new AppError(`Failed to get Deal of the Day info: ${error.message}`, 400);
+    throw new AppError(`Failed to get featured deal info: ${error.message}`, 400);
   }
 
   return {
+    type: data.type,
+    typeLabel: data.typeLabel,
     deal: data.deal?.deal || null,
     manualDeal: data.manualDeal || null,
     hasManualSelection: data.hasManualSelection || false,
+  };
+};
+
+/**
+ * Get all featured deals info (day, week, month) for admin
+ * Used by: GET /api/admin/marketplace/featured-deals
+ */
+export const getAllFeaturedDealsInfo = async (): Promise<{
+  dealOfTheDay: MarketplaceDeal | null;
+  dealOfTheWeek: MarketplaceDeal | null;
+  dealOfTheMonth: MarketplaceDeal | null;
+}> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('get_all_featured_deals');
+
+  if (error) {
+    throw new AppError(`Failed to get featured deals: ${error.message}`, 400);
+  }
+
+  return {
+    dealOfTheDay: data.dealOfTheDay?.deal || null,
+    dealOfTheWeek: data.dealOfTheWeek?.deal || null,
+    dealOfTheMonth: data.dealOfTheMonth?.deal || null,
   };
 };
 

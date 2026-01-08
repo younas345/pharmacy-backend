@@ -300,23 +300,38 @@ export const deleteMarketplaceDealHandler = catchAsync(
 );
 
 // ============================================================
-// Deal of the Day Handlers
+// Featured Deal Handlers (Unified for Day, Week, Month)
 // ============================================================
 
+type FeaturedDealType = 'day' | 'week' | 'month';
+
 /**
- * Set Deal of the Day
+ * Validate and get featured deal type from request
+ */
+const getFeaturedDealType = (typeParam: string | undefined): FeaturedDealType => {
+  const type = (typeParam || 'day').toLowerCase();
+  if (!['day', 'week', 'month'].includes(type)) {
+    throw new AppError('Invalid type. Must be day, week, or month', 400);
+  }
+  return type as FeaturedDealType;
+};
+
+/**
+ * Set Featured Deal (supports day, week, month via type parameter)
  * POST /api/admin/marketplace/deals/:id/set-deal-of-the-day
+ * Body: { type?: "day" | "week" | "month", expiresAt?: string }
  */
 export const setDealOfTheDayHandler = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
     const { id } = req.params;
-    const { expiresAt } = req.body;
+    const { expiresAt, type } = req.body;
 
     if (!id) {
       throw new AppError('Deal ID is required', 400);
     }
 
-    const result = await adminMarketplaceService.setDealOfTheDay(id, expiresAt);
+    const featuredType = getFeaturedDealType(type);
+    const result = await adminMarketplaceService.setDealOfTheDay(id, expiresAt, featuredType);
 
     res.status(200).json({
       status: 'success',
@@ -324,6 +339,7 @@ export const setDealOfTheDayHandler = catchAsync(
       data: {
         dealId: result.dealId,
         productName: result.productName,
+        type: result.type,
         expiresAt: result.expiresAt,
       },
     });
@@ -331,17 +347,19 @@ export const setDealOfTheDayHandler = catchAsync(
 );
 
 /**
- * Unset Deal of the Day
- * DELETE /api/admin/marketplace/deal-of-the-day
+ * Unset Featured Deal (supports day, week, month via type query param)
+ * DELETE /api/admin/marketplace/deal-of-the-day?type=day|week|month
  */
 export const unsetDealOfTheDayHandler = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
-    const result = await adminMarketplaceService.unsetDealOfTheDay();
+    const featuredType = getFeaturedDealType(req.query.type as string);
+    const result = await adminMarketplaceService.unsetDealOfTheDay(featuredType);
 
     res.status(200).json({
       status: 'success',
       message: result.message,
       data: {
+        type: result.type,
         dealsUnset: result.dealsUnset,
       },
     });
@@ -349,12 +367,28 @@ export const unsetDealOfTheDayHandler = catchAsync(
 );
 
 /**
- * Get Deal of the Day info
- * GET /api/admin/marketplace/deal-of-the-day
+ * Get Featured Deal info (supports day, week, month via type query param)
+ * GET /api/admin/marketplace/deal-of-the-day?type=day|week|month
  */
 export const getDealOfTheDayInfoHandler = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
-    const info = await adminMarketplaceService.getDealOfTheDayInfo();
+    const featuredType = getFeaturedDealType(req.query.type as string);
+    const info = await adminMarketplaceService.getDealOfTheDayInfo(featuredType);
+
+    res.status(200).json({
+      status: 'success',
+      data: info,
+    });
+  }
+);
+
+/**
+ * Get all featured deals info (day, week, month)
+ * GET /api/admin/marketplace/featured-deals
+ */
+export const getAllFeaturedDealsInfoHandler = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const info = await adminMarketplaceService.getAllFeaturedDealsInfo();
 
     res.status(200).json({
       status: 'success',
