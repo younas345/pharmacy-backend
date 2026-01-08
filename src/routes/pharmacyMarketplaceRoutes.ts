@@ -4,6 +4,7 @@ import {
   getMarketplaceDealByIdHandler,
   getMarketplaceCategoriesHandler,
   getDealOfTheDayHandler,
+  getAllFeaturedDealsHandler,
   addToCartHandler,
   getCartHandler,
   updateCartItemHandler,
@@ -117,6 +118,30 @@ router.use(authenticate);
  *         cartQuantity:
  *           type: integer
  *           description: Quantity of this deal in cart
+ *         isDealOfTheDay:
+ *           type: boolean
+ *           description: Whether this deal is set as Deal of the Day
+ *         dealOfTheDayUntil:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Expiration timestamp for Deal of the Day status
+ *         isDealOfTheWeek:
+ *           type: boolean
+ *           description: Whether this deal is set as Deal of the Week
+ *         dealOfTheWeekUntil:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Expiration timestamp for Deal of the Week status
+ *         isDealOfTheMonth:
+ *           type: boolean
+ *           description: Whether this deal is set as Deal of the Month
+ *         dealOfTheMonthUntil:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Expiration timestamp for Deal of the Month status
  *     
  *     PharmacyMarketplaceStats:
  *       type: object
@@ -480,17 +505,30 @@ router.get('/categories', getMarketplaceCategoriesHandler);
  * @swagger
  * /api/marketplace/deal-of-the-day:
  *   get:
- *     summary: Get Deal of the Day
+ *     summary: Get Featured Deal
  *     description: |
- *       Returns the current Deal of the Day.
+ *       Returns the current Featured Deal based on the type parameter.
  *       If admin has manually set a deal, returns that.
- *       Otherwise, returns automatic selection based on best savings.
+ *       Otherwise, returns automatic selection.
+ *       
+ *       **Type Options:**
+ *       - `day` - Deal of the Day (default) - Best savings percentage
+ *       - `week` - Deal of the Week - Best savings (excluding Day deal)
+ *       - `month` - Deal of the Month - Highest total savings potential
  *     tags: [Pharmacy - Marketplace]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [day, week, month]
+ *           default: day
+ *         description: Featured deal type
  *     responses:
  *       200:
- *         description: Deal of the Day retrieved successfully
+ *         description: Featured deal retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -505,6 +543,9 @@ router.get('/categories', getMarketplaceCategoriesHandler);
  *                     deal:
  *                       $ref: '#/components/schemas/PharmacyMarketplaceDeal'
  *                       nullable: true
+ *                     type:
+ *                       type: string
+ *                       example: day
  *                 message:
  *                   type: string
  *                   example: No Deal of the Day available
@@ -514,6 +555,47 @@ router.get('/categories', getMarketplaceCategoriesHandler);
  *         description: Internal server error
  */
 router.get('/deal-of-the-day', getDealOfTheDayHandler);
+
+/**
+ * @swagger
+ * /api/marketplace/featured-deals:
+ *   get:
+ *     summary: Get all featured deals
+ *     description: |
+ *       Returns all featured deals (Deal of the Day, Week, and Month) in a single request.
+ *       Useful for displaying a featured deals section on the frontend.
+ *     tags: [Pharmacy - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Featured deals retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     dealOfTheDay:
+ *                       $ref: '#/components/schemas/PharmacyMarketplaceDeal'
+ *                       nullable: true
+ *                     dealOfTheWeek:
+ *                       $ref: '#/components/schemas/PharmacyMarketplaceDeal'
+ *                       nullable: true
+ *                     dealOfTheMonth:
+ *                       $ref: '#/components/schemas/PharmacyMarketplaceDeal'
+ *                       nullable: true
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/featured-deals', getAllFeaturedDealsHandler);
 
 /**
  * @swagger

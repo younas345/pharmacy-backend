@@ -68,55 +68,88 @@ BEGIN
   v_total_pages := CEIL(v_total_count::numeric / p_limit);
 
   -- Get payments with joins
+  -- IMPORTANT: Use subquery to properly ORDER before LIMIT/OFFSET for correct pagination
+  -- When date filters are provided, sort by date (report_date or uploaded_at) DESC
+  -- Otherwise, sort by uploaded_at DESC (newest first)
   SELECT COALESCE(jsonb_agg(
     jsonb_build_object(
-      'id', ud.id,
-      'paymentId', 'PAY-' || SUBSTRING(ud.id::text FROM 1 FOR 8),
-      'pharmacyId', ud.pharmacy_id,
-      'pharmacyName', COALESCE(p.pharmacy_name, p.name, 'Unknown Pharmacy'),
-      'pharmacyEmail', p.email,
-      'amount', ud.total_credit_amount,
-      'date', COALESCE(ud.report_date, ud.uploaded_at::date),
-      'uploadedAt', ud.uploaded_at,
-      'reportDate', ud.report_date,
-      'method', CASE ud.source
+      'id', sub.id,
+      'paymentId', 'PAY-' || SUBSTRING(sub.id::text FROM 1 FOR 8),
+      'pharmacyId', sub.pharmacy_id,
+      'pharmacyName', sub.pharmacy_name,
+      'pharmacyEmail', sub.pharmacy_email,
+      'amount', sub.total_credit_amount,
+      'date', sub.effective_date,
+      'uploadedAt', sub.uploaded_at,
+      'reportDate', sub.report_date,
+      'method', sub.method,
+      'source', sub.source,
+      'transactionId', 'TXN-' || SUBSTRING(sub.id::text FROM 1 FOR 12),
+      'distributorId', sub.reverse_distributor_id,
+      'distributorName', sub.distributor_name,
+      'distributorCode', sub.distributor_code,
+      'fileName', sub.file_name,
+      'fileType', sub.file_type,
+      'fileUrl', sub.file_url,
+      'extractedItems', sub.extracted_items,
+      'processedAt', sub.processed_at
+    )
+  ), '[]'::jsonb)
+  INTO v_payments
+  FROM (
+    -- Subquery to properly order and paginate results
+    SELECT 
+      ud.id,
+      ud.pharmacy_id,
+      COALESCE(p.pharmacy_name, p.name, 'Unknown Pharmacy') AS pharmacy_name,
+      p.email AS pharmacy_email,
+      ud.total_credit_amount,
+      COALESCE(ud.report_date, ud.uploaded_at::date) AS effective_date,
+      ud.uploaded_at,
+      ud.report_date,
+      CASE ud.source
         WHEN 'manual_upload' THEN 'Manual Upload'
         WHEN 'email_forward' THEN 'Email Forward'
         WHEN 'portal_fetch' THEN 'Portal Fetch'
         WHEN 'api' THEN 'API'
         ELSE ud.source
-      END,
-      'source', ud.source,
-      'transactionId', 'TXN-' || SUBSTRING(ud.id::text FROM 1 FOR 12),
-      'distributorId', ud.reverse_distributor_id,
-      'distributorName', COALESCE(rd.name, 'Unknown Distributor'),
-      'distributorCode', rd.code,
-      'fileName', ud.file_name,
-      'fileType', ud.file_type,
-      'fileUrl', ud.file_url,
-      'extractedItems', ud.extracted_items,
-      'processedAt', ud.processed_at
-    ) ORDER BY ud.uploaded_at DESC
-  ), '[]'::jsonb)
-  INTO v_payments
-  FROM uploaded_documents ud
-  LEFT JOIN pharmacy p ON p.id = ud.pharmacy_id
-  LEFT JOIN reverse_distributors rd ON rd.id = ud.reverse_distributor_id
-  WHERE ud.total_credit_amount IS NOT NULL
-    AND ud.total_credit_amount > 0
-    AND (
-      p_search IS NULL 
-      OR p_search = ''
-      OR p.pharmacy_name ILIKE p_search || '%'
-      OR p.name ILIKE p_search || '%'
-      OR ud.id::text ILIKE p_search || '%'
-      OR rd.name ILIKE p_search || '%'
-    )
-    AND (p_pharmacy_id IS NULL OR ud.pharmacy_id = p_pharmacy_id)
-    AND (p_start_date IS NULL OR COALESCE(ud.report_date, ud.uploaded_at::date) >= p_start_date)
-    AND (p_end_date IS NULL OR COALESCE(ud.report_date, ud.uploaded_at::date) <= p_end_date)
-  LIMIT p_limit
-  OFFSET v_offset;
+      END AS method,
+      ud.source,
+      ud.reverse_distributor_id,
+      COALESCE(rd.name, 'Unknown Distributor') AS distributor_name,
+      rd.code AS distributor_code,
+      ud.file_name,
+      ud.file_type,
+      ud.file_url,
+      ud.extracted_items,
+      ud.processed_at
+    FROM uploaded_documents ud
+    LEFT JOIN pharmacy p ON p.id = ud.pharmacy_id
+    LEFT JOIN reverse_distributors rd ON rd.id = ud.reverse_distributor_id
+    WHERE ud.total_credit_amount IS NOT NULL
+      AND ud.total_credit_amount > 0
+      AND (
+        p_search IS NULL 
+        OR p_search = ''
+        OR p.pharmacy_name ILIKE p_search || '%'
+        OR p.name ILIKE p_search || '%'
+        OR ud.id::text ILIKE p_search || '%'
+        OR rd.name ILIKE p_search || '%'
+      )
+      AND (p_pharmacy_id IS NULL OR ud.pharmacy_id = p_pharmacy_id)
+      AND (p_start_date IS NULL OR COALESCE(ud.report_date, ud.uploaded_at::date) >= p_start_date)
+      AND (p_end_date IS NULL OR COALESCE(ud.report_date, ud.uploaded_at::date) <= p_end_date)
+    -- Sort by date when date filters are provided, otherwise by uploaded_at
+    ORDER BY 
+      CASE 
+        WHEN p_start_date IS NOT NULL OR p_end_date IS NOT NULL 
+        THEN COALESCE(ud.report_date, ud.uploaded_at::date)
+        ELSE ud.uploaded_at::date
+      END DESC,
+      ud.uploaded_at DESC  -- Secondary sort for same dates
+    LIMIT p_limit
+    OFFSET v_offset
+  ) sub;
 
   -- Build result with stats included
   v_result := jsonb_build_object(

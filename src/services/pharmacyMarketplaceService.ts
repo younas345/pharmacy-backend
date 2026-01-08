@@ -25,6 +25,13 @@ export interface MarketplaceDeal {
   notes: string | null;
   inCart?: boolean;
   cartQuantity?: number;
+  // Featured deal fields
+  isDealOfTheDay: boolean;
+  dealOfTheDayUntil: string | null;
+  isDealOfTheWeek: boolean;
+  dealOfTheWeekUntil: string | null;
+  isDealOfTheMonth: boolean;
+  dealOfTheMonthUntil: string | null;
 }
 
 export interface MarketplaceStats {
@@ -193,18 +200,27 @@ export const getMarketplaceDealById = async (
   return data.deal;
 };
 
+// ============================================================
+// Featured Deal Type
+// ============================================================
+export type FeaturedDealType = 'day' | 'week' | 'month';
+
 /**
- * Get Deal of the Day
+ * Get Featured Deal (supports day, week, month via type parameter)
  */
-export const getDealOfTheDay = async (): Promise<MarketplaceDeal | null> => {
+export const getDealOfTheDay = async (
+  type: FeaturedDealType = 'day'
+): Promise<MarketplaceDeal | null> => {
   if (!supabaseAdmin) {
     throw new AppError('Supabase admin client not configured', 500);
   }
 
-  const { data, error } = await supabaseAdmin.rpc('get_deal_of_the_day');
+  const { data, error } = await supabaseAdmin.rpc('get_manual_featured_deal', {
+    p_type: type,
+  });
 
   if (error) {
-    throw new AppError(`Failed to get Deal of the Day: ${error.message}`, 400);
+    throw new AppError(`Failed to get featured deal: ${error.message}`, 400);
   }
 
   if (data.error || !data.deal) {
@@ -212,6 +228,31 @@ export const getDealOfTheDay = async (): Promise<MarketplaceDeal | null> => {
   }
 
   return data.deal as MarketplaceDeal;
+};
+
+/**
+ * Get All Featured Deals (Day, Week, Month)
+ */
+export const getAllFeaturedDeals = async (): Promise<{
+  dealOfTheDay: MarketplaceDeal | null;
+  dealOfTheWeek: MarketplaceDeal | null;
+  dealOfTheMonth: MarketplaceDeal | null;
+}> => {
+  if (!supabaseAdmin) {
+    throw new AppError('Supabase admin client not configured', 500);
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('get_all_manual_featured_deals');
+
+  if (error) {
+    throw new AppError(`Failed to get featured deals: ${error.message}`, 400);
+  }
+
+  return {
+    dealOfTheDay: data.dealOfTheDay?.deal || null,
+    dealOfTheWeek: data.dealOfTheWeek?.deal || null,
+    dealOfTheMonth: data.dealOfTheMonth?.deal || null,
+  };
 };
 
 export const getMarketplaceCategories = async (

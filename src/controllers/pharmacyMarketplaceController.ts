@@ -117,9 +117,31 @@ export const getMarketplaceCategoriesHandler = async (
   }
 };
 
+type FeaturedDealType = 'day' | 'week' | 'month';
+
 /**
- * Get Deal of the Day
- * GET /api/marketplace/deal-of-the-day
+ * Validate and get featured deal type from request
+ */
+const getFeaturedDealType = (typeParam: string | undefined): FeaturedDealType => {
+  const type = (typeParam || 'day').toLowerCase();
+  if (!['day', 'week', 'month'].includes(type)) {
+    throw new AppError('Invalid type. Must be day, week, or month', 400);
+  }
+  return type as FeaturedDealType;
+};
+
+const getTypeLabel = (type: FeaturedDealType): string => {
+  const labels: Record<FeaturedDealType, string> = {
+    day: 'Day',
+    week: 'Week',
+    month: 'Month',
+  };
+  return labels[type];
+};
+
+/**
+ * Get Featured Deal (supports day, week, month via type query param)
+ * GET /api/marketplace/deal-of-the-day?type=day|week|month
  */
 export const getDealOfTheDayHandler = async (
   req: Request,
@@ -127,20 +149,42 @@ export const getDealOfTheDayHandler = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const deal = await pharmacyMarketplaceService.getDealOfTheDay();
+    const featuredType = getFeaturedDealType(req.query.type as string);
+    const deal = await pharmacyMarketplaceService.getDealOfTheDay(featuredType);
 
     if (!deal) {
       res.status(200).json({
         status: 'success',
-        data: { deal: null },
-        message: 'No Deal of the Day available',
+        data: { deal: null, type: featuredType },
+        message: `No Deal of the ${getTypeLabel(featuredType)} available`,
       });
       return;
     }
 
     res.status(200).json({
       status: 'success',
-      data: { deal },
+      data: { deal, type: featuredType },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get All Featured Deals (Day, Week, Month)
+ * GET /api/marketplace/featured-deals
+ */
+export const getAllFeaturedDealsHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const featuredDeals = await pharmacyMarketplaceService.getAllFeaturedDeals();
+
+    res.status(200).json({
+      status: 'success',
+      data: featuredDeals,
     });
   } catch (error) {
     next(error);

@@ -11,6 +11,7 @@ import {
   setDealOfTheDayHandler,
   unsetDealOfTheDayHandler,
   getDealOfTheDayInfoHandler,
+  getAllFeaturedDealsInfoHandler,
 } from '../controllers/adminMarketplaceController';
 import { authenticateAdmin } from '../middleware/adminAuth';
 import { uploadImage } from '../middleware/uploadImage';
@@ -119,6 +120,30 @@ router.use(authenticateAdmin);
  *           type: string
  *           format: date-time
  *           description: Last update timestamp
+ *         isDealOfTheDay:
+ *           type: boolean
+ *           description: Whether this deal is set as Deal of the Day
+ *         dealOfTheDayUntil:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Expiration timestamp for Deal of the Day status
+ *         isDealOfTheWeek:
+ *           type: boolean
+ *           description: Whether this deal is set as Deal of the Week
+ *         dealOfTheWeekUntil:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Expiration timestamp for Deal of the Week status
+ *         isDealOfTheMonth:
+ *           type: boolean
+ *           description: Whether this deal is set as Deal of the Month
+ *         dealOfTheMonthUntil:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Expiration timestamp for Deal of the Month status
  *     
  *     MarketplaceStats:
  *       type: object
@@ -461,23 +486,61 @@ router.get('/stats', getMarketplaceStatsHandler);
 router.get('/categories', getMarketplaceCategoriesHandler);
 
 // ============================================================
-// Deal of the Day Routes (MUST be before /:id routes)
+// Featured Deal Routes (Unified for Day, Week, Month)
+// MUST be before /:id routes
 // ============================================================
 
 /**
  * @swagger
  * /api/admin/marketplace/deal-of-the-day:
  *   get:
- *     summary: Get Deal of the Day info
+ *     summary: Get Featured Deal info
  *     description: |
- *       Returns information about the current Deal of the Day,
- *       including whether it's manually set or automatically selected.
+ *       Returns information about the current Featured Deal.
+ *       Use the `type` query parameter to specify day, week, or month.
+ *       
+ *       **Type Options:**
+ *       - `day` - Deal of the Day (default)
+ *       - `week` - Deal of the Week
+ *       - `month` - Deal of the Month
  *     tags: [Admin - Marketplace]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [day, week, month]
+ *           default: day
+ *         description: Featured deal type
  *     responses:
  *       200:
- *         description: Deal of the Day info retrieved successfully
+ *         description: Featured deal info retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     type:
+ *                       type: string
+ *                       example: day
+ *                     typeLabel:
+ *                       type: string
+ *                       example: Day
+ *                     deal:
+ *                       $ref: '#/components/schemas/MarketplaceDeal'
+ *                     manualDeal:
+ *                       type: object
+ *                       nullable: true
+ *                     hasManualSelection:
+ *                       type: boolean
  *       401:
  *         description: Unauthorized
  *       500:
@@ -489,16 +552,49 @@ router.get('/deal-of-the-day', getDealOfTheDayInfoHandler);
  * @swagger
  * /api/admin/marketplace/deal-of-the-day:
  *   delete:
- *     summary: Unset Deal of the Day
+ *     summary: Unset Featured Deal
  *     description: |
- *       Removes the current Deal of the Day.
+ *       Removes the current Featured Deal status.
  *       System will fall back to automatic selection.
+ *       
+ *       **Type Options:**
+ *       - `day` - Deal of the Day (default)
+ *       - `week` - Deal of the Week
+ *       - `month` - Deal of the Month
  *     tags: [Admin - Marketplace]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [day, week, month]
+ *           default: day
+ *         description: Featured deal type to unset
  *     responses:
  *       200:
- *         description: Deal of the Day removed successfully
+ *         description: Featured deal removed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Deal of the Day removed successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     type:
+ *                       type: string
+ *                       example: day
+ *                     dealsUnset:
+ *                       type: integer
+ *                       example: 1
  *       401:
  *         description: Unauthorized
  *       500:
@@ -510,11 +606,16 @@ router.delete('/deal-of-the-day', unsetDealOfTheDayHandler);
  * @swagger
  * /api/admin/marketplace/deals/{id}/set-deal-of-the-day:
  *   post:
- *     summary: Set Deal of the Day
+ *     summary: Set Featured Deal
  *     description: |
- *       Sets a specific deal as the Deal of the Day.
- *       Automatically unsets the previous Deal of the Day.
+ *       Sets a specific deal as a Featured Deal (Day, Week, or Month).
+ *       Automatically unsets the previous featured deal of the same type.
  *       Only active deals with remaining quantity can be set.
+ *       
+ *       **Type Options:**
+ *       - `day` - Deal of the Day (default)
+ *       - `week` - Deal of the Week
+ *       - `month` - Deal of the Month
  *     tags: [Admin - Marketplace]
  *     security:
  *       - bearerAuth: []
@@ -532,6 +633,12 @@ router.delete('/deal-of-the-day', unsetDealOfTheDayHandler);
  *           schema:
  *             type: object
  *             properties:
+ *               type:
+ *                 type: string
+ *                 enum: [day, week, month]
+ *                 default: day
+ *                 description: Featured deal type
+ *                 example: day
  *               expiresAt:
  *                 type: string
  *                 format: date-time
@@ -539,15 +646,83 @@ router.delete('/deal-of-the-day', unsetDealOfTheDayHandler);
  *                 example: "2024-12-31T23:59:59Z"
  *     responses:
  *       200:
- *         description: Deal of the Day set successfully
+ *         description: Featured deal set successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 message:
+ *                   type: string
+ *                   example: Deal of the Day updated successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     dealId:
+ *                       type: string
+ *                       format: uuid
+ *                     productName:
+ *                       type: string
+ *                     type:
+ *                       type: string
+ *                       example: day
+ *                     expiresAt:
+ *                       type: string
+ *                       format: date-time
+ *                       nullable: true
  *       400:
- *         description: Bad request - deal not active or invalid
+ *         description: Bad request - deal not active or invalid type
  *       401:
  *         description: Unauthorized
  *       500:
  *         description: Internal server error
  */
 router.post('/deals/:id/set-deal-of-the-day', setDealOfTheDayHandler);
+
+/**
+ * @swagger
+ * /api/admin/marketplace/featured-deals:
+ *   get:
+ *     summary: Get all featured deals info
+ *     description: |
+ *       Returns information about all featured deals:
+ *       Deal of the Day, Deal of the Week, and Deal of the Month.
+ *       Useful for admin dashboard to see all featured deals at once.
+ *     tags: [Admin - Marketplace]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Featured deals info retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     dealOfTheDay:
+ *                       $ref: '#/components/schemas/MarketplaceDeal'
+ *                       nullable: true
+ *                     dealOfTheWeek:
+ *                       $ref: '#/components/schemas/MarketplaceDeal'
+ *                       nullable: true
+ *                     dealOfTheMonth:
+ *                       $ref: '#/components/schemas/MarketplaceDeal'
+ *                       nullable: true
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/featured-deals', getAllFeaturedDealsInfoHandler);
 
 /**
  * @swagger

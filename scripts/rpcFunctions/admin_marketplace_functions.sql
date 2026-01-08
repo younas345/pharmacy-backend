@@ -44,6 +44,31 @@ BEGIN
   SET status = 'expired', updated_at = NOW()
   WHERE status = 'active' AND expiry_date < CURRENT_DATE;
   
+  -- Expire any manual featured deals that have passed their expiration
+  UPDATE marketplace_deals
+  SET is_deal_of_the_day = FALSE,
+      deal_of_the_day_until = NULL,
+      updated_at = NOW()
+  WHERE is_deal_of_the_day = TRUE
+    AND deal_of_the_day_until IS NOT NULL
+    AND deal_of_the_day_until < NOW();
+    
+  UPDATE marketplace_deals
+  SET is_deal_of_the_week = FALSE,
+      deal_of_the_week_until = NULL,
+      updated_at = NOW()
+  WHERE is_deal_of_the_week = TRUE
+    AND deal_of_the_week_until IS NOT NULL
+    AND deal_of_the_week_until < NOW();
+    
+  UPDATE marketplace_deals
+  SET is_deal_of_the_month = FALSE,
+      deal_of_the_month_until = NULL,
+      updated_at = NOW()
+  WHERE is_deal_of_the_month = TRUE
+    AND deal_of_the_month_until IS NOT NULL
+    AND deal_of_the_month_until < NOW();
+  
   -- ============================================================
   -- STATS: Calculate statistics
   -- ============================================================
@@ -127,7 +152,13 @@ BEGIN
       'imageUrl', d.image_url,
       'createdBy', d.created_by,
       'createdAt', d.created_at,
-      'updatedAt', d.updated_at
+      'updatedAt', d.updated_at,
+      'isDealOfTheDay', COALESCE(d.is_deal_of_the_day, false),
+      'dealOfTheDayUntil', d.deal_of_the_day_until,
+      'isDealOfTheWeek', COALESCE(d.is_deal_of_the_week, false),
+      'dealOfTheWeekUntil', d.deal_of_the_week_until,
+      'isDealOfTheMonth', COALESCE(d.is_deal_of_the_month, false),
+      'dealOfTheMonthUntil', d.deal_of_the_month_until
     ) AS deal_row
     FROM marketplace_deals d
     WHERE 
@@ -225,7 +256,13 @@ BEGIN
     'imageUrl', d.image_url,
     'createdBy', d.created_by,
     'createdAt', d.created_at,
-    'updatedAt', d.updated_at
+    'updatedAt', d.updated_at,
+    'isDealOfTheDay', COALESCE(d.is_deal_of_the_day, false),
+    'dealOfTheDayUntil', d.deal_of_the_day_until,
+    'isDealOfTheWeek', COALESCE(d.is_deal_of_the_week, false),
+    'dealOfTheWeekUntil', d.deal_of_the_week_until,
+    'isDealOfTheMonth', COALESCE(d.is_deal_of_the_month, false),
+    'dealOfTheMonthUntil', d.deal_of_the_month_until
   )
   INTO v_deal
   FROM marketplace_deals d
@@ -249,6 +286,10 @@ $$;
 -- 3. CREATE MARKETPLACE DEAL
 -- Creates a new deal
 -- ============================================================
+
+-- Drop all existing versions of the function
+DROP FUNCTION IF EXISTS create_marketplace_deal(TEXT, TEXT, INTEGER, TEXT, NUMERIC, NUMERIC, TEXT, DATE, TEXT, UUID, TEXT, TEXT, UUID);
+DROP FUNCTION IF EXISTS create_marketplace_deal(TEXT, TEXT, INTEGER, TEXT, NUMERIC, NUMERIC, TEXT, DATE, TEXT, UUID, TEXT, TEXT, UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION create_marketplace_deal(
   p_product_name TEXT,
@@ -379,7 +420,13 @@ BEGIN
     'status', d.status,
     'notes', d.notes,
     'imageUrl', d.image_url,
-    'createdAt', d.created_at
+    'createdAt', d.created_at,
+    'isDealOfTheDay', COALESCE(d.is_deal_of_the_day, false),
+    'dealOfTheDayUntil', d.deal_of_the_day_until,
+    'isDealOfTheWeek', COALESCE(d.is_deal_of_the_week, false),
+    'dealOfTheWeekUntil', d.deal_of_the_week_until,
+    'isDealOfTheMonth', COALESCE(d.is_deal_of_the_month, false),
+    'dealOfTheMonthUntil', d.deal_of_the_month_until
   )
   INTO v_deal
   FROM marketplace_deals d
@@ -397,6 +444,10 @@ $$;
 -- 4. UPDATE MARKETPLACE DEAL
 -- Updates an existing deal
 -- ============================================================
+
+-- Drop all existing versions of the function
+DROP FUNCTION IF EXISTS update_marketplace_deal(UUID, TEXT, TEXT, INTEGER, TEXT, NUMERIC, NUMERIC, TEXT, DATE, TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS update_marketplace_deal(UUID, TEXT, TEXT, INTEGER, TEXT, NUMERIC, NUMERIC, TEXT, DATE, TEXT, TEXT, TEXT, TEXT, INTEGER);
 
 CREATE OR REPLACE FUNCTION update_marketplace_deal(
   p_deal_id UUID,
@@ -494,7 +545,13 @@ BEGIN
     'notes', d.notes,
     'imageUrl', d.image_url,
     'createdAt', d.created_at,
-    'updatedAt', d.updated_at
+    'updatedAt', d.updated_at,
+    'isDealOfTheDay', COALESCE(d.is_deal_of_the_day, false),
+    'dealOfTheDayUntil', d.deal_of_the_day_until,
+    'isDealOfTheWeek', COALESCE(d.is_deal_of_the_week, false),
+    'dealOfTheWeekUntil', d.deal_of_the_week_until,
+    'isDealOfTheMonth', COALESCE(d.is_deal_of_the_month, false),
+    'dealOfTheMonthUntil', d.deal_of_the_month_until
   )
   INTO v_deal
   FROM marketplace_deals d
