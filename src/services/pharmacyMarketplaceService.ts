@@ -215,7 +215,7 @@ export const getDealOfTheDay = async (
     throw new AppError('Supabase admin client not configured', 500);
   }
 
-  const { data, error } = await supabaseAdmin.rpc('get_featured_deal', {
+  const { data, error } = await supabaseAdmin.rpc('get_manual_featured_deal', {
     p_type: type,
   });
 
@@ -242,7 +242,7 @@ export const getAllFeaturedDeals = async (): Promise<{
     throw new AppError('Supabase admin client not configured', 500);
   }
 
-  const { data, error } = await supabaseAdmin.rpc('get_all_featured_deals');
+  const { data, error } = await supabaseAdmin.rpc('get_all_manual_featured_deals');
 
   if (error) {
     throw new AppError(`Failed to get featured deals: ${error.message}`, 400);
