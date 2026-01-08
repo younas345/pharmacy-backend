@@ -51,7 +51,7 @@ BEGIN
   SET status = 'expired', updated_at = NOW()
   WHERE status = 'active' AND expiry_date < CURRENT_DATE;
   
-  -- Expire any manual Deal of the Day that has passed its expiration
+  -- Expire any manual featured deals that have passed their expiration
   UPDATE marketplace_deals
   SET is_deal_of_the_day = FALSE,
       deal_of_the_day_until = NULL,
@@ -59,6 +59,22 @@ BEGIN
   WHERE is_deal_of_the_day = TRUE
     AND deal_of_the_day_until IS NOT NULL
     AND deal_of_the_day_until < NOW();
+    
+  UPDATE marketplace_deals
+  SET is_deal_of_the_week = FALSE,
+      deal_of_the_week_until = NULL,
+      updated_at = NOW()
+  WHERE is_deal_of_the_week = TRUE
+    AND deal_of_the_week_until IS NOT NULL
+    AND deal_of_the_week_until < NOW();
+    
+  UPDATE marketplace_deals
+  SET is_deal_of_the_month = FALSE,
+      deal_of_the_month_until = NULL,
+      updated_at = NOW()
+  WHERE is_deal_of_the_month = TRUE
+    AND deal_of_the_month_until IS NOT NULL
+    AND deal_of_the_month_until < NOW();
   
   -- Get Deal of the Day ID to exclude (manual or automatic)
   -- First check for manual Deal of the Day
@@ -144,7 +160,13 @@ BEGIN
       'postedDate', d.posted_date,
       'status', d.status,
       'imageUrl', d.image_url,
-      'notes', d.notes
+      'notes', d.notes,
+      'isDealOfTheDay', COALESCE(d.is_deal_of_the_day, false),
+      'dealOfTheDayUntil', d.deal_of_the_day_until,
+      'isDealOfTheWeek', COALESCE(d.is_deal_of_the_week, false),
+      'dealOfTheWeekUntil', d.deal_of_the_week_until,
+      'isDealOfTheMonth', COALESCE(d.is_deal_of_the_month, false),
+      'dealOfTheMonthUntil', d.deal_of_the_month_until
     ) AS deal_row
     FROM marketplace_deals d
     WHERE 
@@ -245,7 +267,13 @@ BEGIN
     'postedDate', d.posted_date,
     'status', d.status,
     'imageUrl', d.image_url,
-    'notes', d.notes
+    'notes', d.notes,
+    'isDealOfTheDay', COALESCE(d.is_deal_of_the_day, false),
+    'dealOfTheDayUntil', d.deal_of_the_day_until,
+    'isDealOfTheWeek', COALESCE(d.is_deal_of_the_week, false),
+    'dealOfTheWeekUntil', d.deal_of_the_week_until,
+    'isDealOfTheMonth', COALESCE(d.is_deal_of_the_month, false),
+    'dealOfTheMonthUntil', d.deal_of_the_month_until
   )
   INTO v_deal
   FROM marketplace_deals d

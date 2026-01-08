@@ -25,6 +25,13 @@ export interface MarketplaceDeal {
   notes: string | null;
   inCart?: boolean;
   cartQuantity?: number;
+  // Featured deal fields
+  isDealOfTheDay: boolean;
+  dealOfTheDayUntil: string | null;
+  isDealOfTheWeek: boolean;
+  dealOfTheWeekUntil: string | null;
+  isDealOfTheMonth: boolean;
+  dealOfTheMonthUntil: string | null;
 }
 
 export interface MarketplaceStats {

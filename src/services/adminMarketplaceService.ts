@@ -27,6 +27,13 @@ export interface MarketplaceDeal {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  // Featured deal fields
+  isDealOfTheDay?: boolean;
+  dealOfTheDayUntil?: string | null;
+  isDealOfTheWeek?: boolean;
+  dealOfTheWeekUntil?: string | null;
+  isDealOfTheMonth?: boolean;
+  dealOfTheMonthUntil?: string | null;
 }
 
 export interface MarketplaceStats {

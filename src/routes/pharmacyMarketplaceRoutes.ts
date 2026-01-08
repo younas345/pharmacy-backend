@@ -118,6 +118,30 @@ router.use(authenticate);
  *         cartQuantity:
  *           type: integer
  *           description: Quantity of this deal in cart
+ *         isDealOfTheDay:
+ *           type: boolean
+ *           description: Whether this deal is set as Deal of the Day
+ *         dealOfTheDayUntil:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Expiration timestamp for Deal of the Day status
+ *         isDealOfTheWeek:
+ *           type: boolean
+ *           description: Whether this deal is set as Deal of the Week
+ *         dealOfTheWeekUntil:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Expiration timestamp for Deal of the Week status
+ *         isDealOfTheMonth:
+ *           type: boolean
+ *           description: Whether this deal is set as Deal of the Month
+ *         dealOfTheMonthUntil:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Expiration timestamp for Deal of the Month status
  *     
  *     PharmacyMarketplaceStats:
  *       type: object
